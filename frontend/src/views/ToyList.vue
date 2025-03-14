@@ -504,6 +504,9 @@ onMounted(() => {
 <style scoped>
 .toy-list {
   padding: 20px;
+  font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
+  font-size: 16px;
+  font-weight: bold;
 }
 
 .operation-bar {
@@ -555,6 +558,17 @@ onMounted(() => {
 .el-table {
   position: relative;
   z-index: 1;
+  text-align: center;
+}
+
+/* 确保表格内容居中 */
+:deep(.el-table .cell) {
+  text-align: center;
+}
+
+/* 确保表头居中 */
+:deep(.el-table th > .cell) {
+  text-align: center;
 }
 
 /* 确保图片预览组件显示在最上层 */
@@ -583,5 +597,23 @@ onMounted(() => {
 
 :deep(.el-image-viewer__canvas) {
   z-index: 2000;
+}
+
+/* 对话框样式 */
+:deep(.el-dialog__header) {
+  text-align: center;
+}
+
+:deep(.el-dialog__title) {
+  font-weight: bold;
+  font-size: 18px;
+}
+
+:deep(.el-form-item__label) {
+  font-weight: bold;
+}
+
+:deep(.el-button) {
+  font-weight: bold;
 }
 </style>
