@@ -6,6 +6,9 @@
           <el-form-item label="品名" prop="name">
             <el-input v-model="searchForm.name" placeholder="请输入品名" clearable />
           </el-form-item>
+          <el-form-item label="厂名" prop="factory_name">
+            <el-input v-model="searchForm.factory_name" placeholder="请输入厂名" clearable />
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="handleSearch">搜索</el-button>
             <el-button @click="handleReset">重置</el-button>
@@ -39,6 +42,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="factory_code" label="货号" />
+      <el-table-column prop="factory_name" label="厂名" />
       <el-table-column prop="name" label="品名" />
       <el-table-column prop="packaging" label="包装" />
       <el-table-column prop="packing_quantity" label="装箱量PCS" />
@@ -65,6 +69,9 @@
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
         <el-form-item label="货号" prop="factory_code">
           <el-input v-model="form.factory_code" />
+        </el-form-item>
+        <el-form-item label="厂名" prop="factory_name">
+          <el-input v-model="form.factory_name" />
         </el-form-item>
         <el-form-item label="品名" prop="name">
           <el-input v-model="form.name" />
@@ -172,6 +179,7 @@ const imageFile = ref(null)
 
 const form = ref({
   factory_code: '',
+  factory_name: '',
   name: '',
   packaging: '',
   packing_quantity: 1,
@@ -185,7 +193,8 @@ const form = ref({
 })
 
 const searchForm = ref({
-  name: ''
+  name: '',
+  factory_name: ''
 })
 
 const searchFormRef = ref(null)
@@ -196,7 +205,8 @@ const handleSearch = async () => {
   try {
     const response = await axios.get('http://localhost:8000/items/', {
       params: {
-        name: searchForm.value.name
+        name: searchForm.value.name,
+        factory_name: searchForm.value.factory_name
       }
     })
     items.value = response.data
@@ -236,6 +246,7 @@ const showCreateDialog = () => {
   dialogType.value = 'create'
   form.value = {
     factory_code: '',
+    factory_name: '',
     name: '',
     packaging: '',
     packing_quantity: 1,
@@ -271,6 +282,10 @@ const rules = {
   factory_code: [
     { required: true, message: '请输入货号', trigger: 'blur' },
     { min: 2, max: 100, message: '货号长度应在2-100个字符之间', trigger: 'blur' }
+  ],
+  factory_name: [
+    { required: true, message: '请输入厂名', trigger: 'blur' },
+    { min: 2, max: 64, message: '厂名长度应在2-64个字符之间', trigger: 'blur' }
   ],
   name: [
     { required: true, message: '请输入品名', trigger: 'blur' },
@@ -324,6 +339,7 @@ const handleSubmit = async () => {
     
     // 确保数值类型字段被正确转换
     formData.append('factory_code', form.value.factory_code)
+    formData.append('factory_name', form.value.factory_name)
     formData.append('name', form.value.name)
     formData.append('packaging', form.value.packaging)
     formData.append('packing_quantity', form.value.packing_quantity.toString())

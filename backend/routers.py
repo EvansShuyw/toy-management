@@ -21,14 +21,17 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 获取所有货物报价表项目
 @router.get("/items/", response_model=List[dict])
-def get_items(name: str = None, db: Session = Depends(models.get_db)):
+def get_items(name: str = None, factory_name: str = None, db: Session = Depends(models.get_db)):
     query = db.query(models.ToyItem)
     if name:
         query = query.filter(models.ToyItem.name.ilike(f"%{name}%"))
+    if factory_name:
+        query = query.filter(models.ToyItem.factory_name.ilike(f"%{factory_name}%"))
     items = query.all()
     return [{
         "id": item.id,
         "factory_code": item.factory_code,
+        "factory_name": item.factory_name,
         "name": item.name,
         "packaging": item.packaging,
         "packing_quantity": item.packing_quantity,
@@ -47,6 +50,7 @@ def get_items(name: str = None, db: Session = Depends(models.get_db)):
 # 创建新的货物报价表项目
 @router.post("/items/")
 async def create_item(factory_code: str = Form(...),
+                     factory_name: str = Form(...),
                      name: str = Form(...),
                      packaging: str = Form(...),
                      packing_quantity: int = Form(...),
@@ -73,6 +77,7 @@ async def create_item(factory_code: str = Form(...),
     # 创建数据库记录
     db_item = models.ToyItem(
         factory_code=factory_code,
+        factory_name=factory_name,
         name=name,
         packaging=packaging,
         packing_quantity=packing_quantity,
@@ -94,6 +99,7 @@ async def create_item(factory_code: str = Form(...),
 @router.put("/items/{item_id}")
 async def update_item(item_id: int,
                      factory_code: str = Form(...),
+                     factory_name: str = Form(...),
                      name: str = Form(...),
                      packaging: str = Form(...),
                      packing_quantity: int = Form(...),
@@ -106,11 +112,13 @@ async def update_item(item_id: int,
                      remarks: str = Form(None),
                      image: UploadFile = File(None),
                      db: Session = Depends(models.get_db)):
+    # 查找要更新的记录
     db_item = db.query(models.ToyItem).filter(models.ToyItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    # 处理新图片上传
+    # 处理图片上传
+    image_path = db_item.image_path
     if image:
         # 删除旧图片
         if db_item.image_path and os.path.exists(db_item.image_path):
@@ -123,10 +131,11 @@ async def update_item(item_id: int,
         
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
-        db_item.image_path = file_path
+        image_path = file_path
     
-    # 更新其他字段
+    # 更新记录
     db_item.factory_code = factory_code
+    db_item.factory_name = factory_name
     db_item.name = name
     db_item.packaging = packaging
     db_item.packing_quantity = packing_quantity
@@ -137,6 +146,8 @@ async def update_item(item_id: int,
     db_item.product_size = product_size
     db_item.inner_box = inner_box
     db_item.remarks = remarks
+    db_item.image_path = image_path
+    db_item.updated_at = datetime.now()
     
     db.commit()
     db.refresh(db_item)
@@ -172,23 +183,24 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
     ws.title = "货物报价表"
     
     # 添加表头
-    headers = ["图片", "货号", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
+    headers = ["图片", "货号", "厂名", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
     for col, header in enumerate(headers, 1):
         ws.cell(row=1, column=col, value=header)
     
     # 添加数据
     for row, item in enumerate(items, 2):
         ws.cell(row=row, column=2, value=item.factory_code)
-        ws.cell(row=row, column=3, value=item.name)
-        ws.cell(row=row, column=4, value=item.packaging)
-        ws.cell(row=row, column=5, value=item.packing_quantity)
-        ws.cell(row=row, column=6, value=item.unit_price)
-        ws.cell(row=row, column=7, value=item.gross_weight)
-        ws.cell(row=row, column=8, value=item.net_weight)
-        ws.cell(row=row, column=9, value=item.outer_box_size)
-        ws.cell(row=row, column=10, value=item.product_size)
-        ws.cell(row=row, column=11, value=item.inner_box)
-        ws.cell(row=row, column=12, value=item.remarks)
+        ws.cell(row=row, column=3, value=item.factory_name)
+        ws.cell(row=row, column=4, value=item.name)
+        ws.cell(row=row, column=5, value=item.packaging)
+        ws.cell(row=row, column=6, value=item.packing_quantity)
+        ws.cell(row=row, column=7, value=item.unit_price)
+        ws.cell(row=row, column=8, value=item.gross_weight)
+        ws.cell(row=row, column=9, value=item.net_weight)
+        ws.cell(row=row, column=10, value=item.outer_box_size)
+        ws.cell(row=row, column=11, value=item.product_size)
+        ws.cell(row=row, column=12, value=item.inner_box)
+        ws.cell(row=row, column=13, value=item.remarks)
         
         # 处理图片
         if item.image_path and os.path.exists(item.image_path):
@@ -264,7 +276,9 @@ async def import_items(
         
         # 定义字段映射（Excel列名 -> 数据库字段名）
         field_mapping = {
+            "图片": "image_path",
             "货号": "factory_code",
+            "厂名": "factory_name",
             "品名": "name",
             "包装": "packaging",
             "装箱量PCS": "packing_quantity",
@@ -297,6 +311,7 @@ async def import_items(
                 # 创建新记录
                 new_item = models.ToyItem(
                     factory_code=row[field_indices.get("factory_code")].value if "factory_code" in field_indices else None,
+                    factory_name=row[field_indices.get("factory_name")].value if "factory_name" in field_indices else factory_name,
                     name=row[field_indices.get("name")].value if "name" in field_indices else None,
                     packaging=row[field_indices.get("packaging")].value if "packaging" in field_indices else None,
                     packing_quantity=int(row[field_indices.get("packing_quantity")].value) if "packing_quantity" in field_indices and row[field_indices.get("packing_quantity")].value is not None else 0,
@@ -306,14 +321,14 @@ async def import_items(
                     outer_box_size=row[field_indices.get("outer_box_size")].value if "outer_box_size" in field_indices else None,
                     product_size=row[field_indices.get("product_size")].value if "product_size" in field_indices else None,
                     inner_box=row[field_indices.get("inner_box")].value if "inner_box" in field_indices else None,
-                    remarks=row[field_indices.get("remarks")].value if "remarks" in field_indices else None
+                    remarks=row[field_indices.get("remarks")].value if "remarks" in field_indices else None,
+                    # 图片字段在Excel中只是一个提示，实际导入时不会处理图片数据
+                    image_path=None
                 )
                 
-                # 如果提供了厂名，添加到备注中
-                if factory_name and new_item.remarks:
-                    new_item.remarks = f"{factory_name} - {new_item.remarks}"
-                elif factory_name:
-                    new_item.remarks = factory_name
+                # 如果提供了厂名但Excel中没有厂名字段，使用表单提供的厂名
+                if not new_item.factory_name:
+                    new_item.factory_name = factory_name
                 
                 # 检查必填字段
                 if not new_item.factory_code or not new_item.name or not new_item.packaging:
@@ -352,13 +367,16 @@ async def get_import_template():
     ws.title = "货物导入模板"
     
     # 添加表头
-    headers = ["货号", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
+    headers = ["图片", "货号", "厂名", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
     for col_idx, header in enumerate(headers, start=1):
         ws.cell(row=1, column=col_idx, value=header)
     
     # 设置列宽
     for col_idx in range(1, len(headers) + 1):
         ws.column_dimensions[chr(64 + col_idx)].width = 15
+    
+    # 特别设置图片列的宽度
+    ws.column_dimensions['A'].width = 20
     
     # 保存到临时文件
     template_path = "exports/import_template.xlsx"
