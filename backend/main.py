@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import routers
 import models
+import os
 
 app = FastAPI()
 
@@ -22,7 +23,7 @@ app.add_middleware(
 app.include_router(routers.router)
 
 # 配置静态文件服务
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "uploads")), name="uploads")
 
 @app.get("/")
 async def read_root():

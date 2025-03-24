@@ -140,6 +140,7 @@
             :auto-upload="false"
             :on-change="handleFileChange"
             :limit="1"
+            ref="uploadRef"
             accept=".xlsx,.xls">
             <template #trigger>
               <el-button type="primary">选择文件</el-button>
@@ -268,13 +269,16 @@ const showEditDialog = (row) => {
   dialogType.value = 'edit'
   form.value = { ...row }
   imageUrl.value = row.image_path ? `http://localhost:8000/${row.image_path}` : ''
+  imageFile.value = null
   dialogVisible.value = true
 }
 
 // 处理图片变更
 const handleImageChange = (file) => {
-  imageFile.value = file.raw
-  imageUrl.value = URL.createObjectURL(file.raw)
+  if (file && file.raw) {
+    imageFile.value = file.raw
+    imageUrl.value = URL.createObjectURL(file.raw)
+  }
 }
 
 const formRef = ref(null)
@@ -447,6 +451,7 @@ const importForm = ref({
   file: null
 })
 const importFormRef = ref(null)
+const uploadRef = ref(null)
 const importing = ref(false)
 
 // 显示导入对话框
@@ -478,9 +483,26 @@ const handleImport = async () => {
     
     const response = await axios.post('http://localhost:8000/items/import', formData)
     
-    ElMessage.success(`成功导入 ${response.data.imported_count} 条数据`)
-    importDialogVisible.value = false
-    fetchItems() // 刷新列表
+    if (response.data && response.data.imported_count) {
+      ElMessage.success(`成功导入 ${response.data.imported_count} 条数据`)
+          importing.value = false
+          uploadRef.value.clearFiles()
+          importDialogVisible.value = false
+      importDialogVisible.value = false
+      fetchItems()
+      importForm.value = {
+        factory_name: '',
+        file: null
+      }
+      if (importFormRef.value) {
+        importFormRef.value.resetFields()
+      }
+      if (uploadRef.value) {
+        uploadRef.value.clearFiles()
+      }
+    } else {
+      ElMessage.error('导入失败：未导入任何数据')
+    }
   } catch (error) {
     console.error('导入失败:', error)
     ElMessage.error(error.response?.data?.detail || '导入失败')

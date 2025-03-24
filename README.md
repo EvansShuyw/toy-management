@@ -61,12 +61,12 @@ npm run dev
 # 进入后端目录
 cd backend
 
-# 创建并激活虚拟环境（可选）
+# 创建并激活虚拟环境
 python -m venv venv
 venv\Scripts\activate
 
 # 安装依赖
-pip install -r requirements.txt
+venv\Scripts\python -m pip install -r requirements.txt
 
 # 启动后端服务
 uvicorn main:app --reload --host 0.0.0.0 --port 8000

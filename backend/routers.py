@@ -6,17 +6,20 @@ import models
 from datetime import datetime
 import os
 import shutil
+import uuid
 from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image
 from PIL import Image as PILImage
 from io import BytesIO
+import openpyxl.styles
+import os.path
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 router = APIRouter()
 
 # 配置图片上传目录
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 获取所有货物报价表项目
@@ -68,11 +71,16 @@ async def create_item(factory_code: str = Form(...),
     if image:
         file_ext = os.path.splitext(image.filename)[1]
         file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    try:
         file_path = os.path.join(UPLOAD_DIR, file_name)
-        
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
-        image_path = file_path
+        # 确保文件路径正确
+        image_path = os.path.relpath(file_path, os.path.dirname(__file__)).replace('\\', '/')
+        # 设置为相对URL路径以便前端访问
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
     # 创建数据库记录
     db_item = models.ToyItem(
@@ -121,17 +129,23 @@ async def update_item(item_id: int,
     image_path = db_item.image_path
     if image:
         # 删除旧图片
-        if db_item.image_path and os.path.exists(db_item.image_path):
-            os.remove(db_item.image_path)
+        if db_item.image_path:
+            old_file_path = os.path.join(os.path.dirname(__file__), db_item.image_path.lstrip('/'))
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
         
         # 保存新图片
         file_ext = os.path.splitext(image.filename)[1]
         file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"
-        file_path = os.path.join(UPLOAD_DIR, file_name)
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        image_path = file_path
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        try:
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            # 设置为相对URL路径以便前端访问
+            image_path = f"uploads/{file_name}"
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
     # 更新记录
     db_item.factory_code = factory_code
@@ -161,8 +175,10 @@ def delete_item(item_id: int, db: Session = Depends(models.get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
     
     # 删除关联的图片文件
-    if db_item.image_path and os.path.exists(db_item.image_path):
-        os.remove(db_item.image_path)
+    if db_item.image_path:
+        file_path = os.path.join(UPLOAD_DIR, os.path.basename(db_item.image_path))
+        if os.path.exists(file_path):
+            os.remove(file_path)
     
     db.delete(db_item)
     db.commit()
@@ -204,37 +220,53 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
         
         # 处理图片
         if item.image_path and os.path.exists(item.image_path):
-            # 使用PIL打开并调整图片大小，保持EXIF方向信息
+            # 使用PIL打开并转换图片
             pil_image = PILImage.open(item.image_path)
-            # 获取EXIF信息并保持图片方向
-            try:
-                for orientation in pil_image._getexif().values():
-                    if orientation == 3:
-                        pil_image = pil_image.rotate(180, expand=True)
-                    elif orientation == 6:
-                        pil_image = pil_image.rotate(270, expand=True)
-                    elif orientation == 8:
-                        pil_image = pil_image.rotate(90, expand=True)
-            except (AttributeError, KeyError, IndexError, TypeError):
-                # 如果没有EXIF信息，保持原样
-                pass
+            # 转换图片为RGB模式（如果是RGBA）
+            if pil_image.mode in ('RGBA', 'LA'):
+                background = PILImage.new('RGB', pil_image.size, (255, 255, 255))
+                background.paste(pil_image, mask=pil_image.split()[-1])
+                pil_image = background
             
-            # 保持原始图片大小
+            # 获取原始图片尺寸
+            img_width, img_height = pil_image.size
             
-            # 将PIL图片转换为openpyxl可用的格式
+            # 设置更合理的尺寸限制，保持更高的图片质量
+            max_height = 600  # 增加最大高度限制
+            max_width = 800   # 增加最大宽度限制
+            
+            # 计算缩放比例，但保持更高的图片质量
+            scale = min(max_width/img_width, max_height/img_height, 1.0)
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            # 仅当图片超过最大限制时才调整大小，使用高质量的缩放算法
+            if scale < 1.0:
+                pil_image = pil_image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+            
+            # 保存为临时的BytesIO对象，使用最高质量设置
             img_byte_arr = BytesIO()
-            pil_image.save(img_byte_arr, format=pil_image.format if pil_image.format else 'PNG')
+            pil_image.save(img_byte_arr, format='PNG', optimize=False, quality=100)
             img_byte_arr.seek(0)
             
-            # 创建openpyxl图片对象并插入到单元格
+            # 创建openpyxl图片对象
             img = Image(img_byte_arr)
-            # 调整单元格大小以适应原始图片
-            ws.row_dimensions[row].height = 150  # 设置更大的行高以适应原始图片
-            ws.column_dimensions['A'].width = 30  # 设置图片列宽度
             
-            # 将图片添加到工作表并定位到对应单元格
-            img.anchor = f'A{row}'
-            ws.add_image(img)
+            # 根据图片实际大小设置单元格，增加系数以确保单元格足够大
+            row_height = new_height * 0.85  # 增加Excel单元格高度转换因子
+            col_width = new_width * 0.18   # 增加Excel单元格宽度转换因子
+            
+            # 设置单元格大小
+            ws.row_dimensions[row].height = row_height
+            ws.column_dimensions['A'].width = col_width
+            
+            # 将图片添加到单元格，使用精确定位
+            cell_address = f'A{row}'
+            ws.add_image(img, cell_address)
+            # 调整单元格对齐方式
+            cell = ws.cell(row=row, column=1)
+            cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+
     
     # 保存Excel文件
     file_name = f"货物报价表_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
@@ -308,6 +340,54 @@ async def import_items(
         imported_count = 0
         for row_idx, row in enumerate(sheet.iter_rows(min_row=2), start=2):  # 从第二行开始（跳过表头）
             try:
+                # 处理图片
+                image_path = None
+                if "image_path" in field_indices:
+                    try:
+                        # 获取单元格中的图片
+                        cell_coord = f"{chr(65 + field_indices['image_path'])}{row_idx}"
+                        # 使用_images属性获取工作表中的所有图片
+                        for image in sheet._images:
+                            if hasattr(image, 'anchor') and hasattr(image.anchor, '_from') and image.anchor._from.coord == cell_coord:
+                                try:
+                                    # 获取图片数据
+                                    image_data = image._data()
+                                    if not image_data:
+                                        print(f"第 {row_idx} 行的图片数据为空")
+                                        continue
+                                    
+                                    # 从图片数据创建PIL Image对象
+                                    img = PILImage.open(BytesIO(image_data))
+                                    
+                                    # 如果是RGBA模式，转换为RGB
+                                    if img.mode in ('RGBA', 'LA'):
+                                        background = PILImage.new('RGB', img.size, (255, 255, 255))
+                                        background.paste(img, mask=img.split()[-1])
+                                        img = background
+                                    
+                                    # 生成唯一的文件名
+                                    file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
+                                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                                    file_path = os.path.abspath(os.path.join(UPLOAD_DIR, file_name))
+                                    
+                                    # 确保文件路径在uploads目录内
+                                    if not os.path.commonpath([file_path, os.path.abspath(UPLOAD_DIR)]) == os.path.abspath(UPLOAD_DIR):
+                                        raise ValueError("无效的文件路径")
+                                    
+                                    # 保存为PNG格式，使用最高质量设置
+                                    img.save(file_path, 'PNG', optimize=True, quality=100)
+                                    print(f'成功保存图片到：{file_path}')
+                                    # 设置为相对URL路径以便前端访问
+                                    image_path = f"uploads/{file_name}"
+                                    print(f'图片路径已设置: {image_path}')
+                                    break  # 找到并处理了图片后就退出循环
+                                except Exception as e:
+                                    print(f"处理第 {row_idx} 行图片时出错: {str(e)}")
+                                    continue
+                    except Exception as e:
+                        print(f"处理Excel图片时出错: {str(e)}")
+                        # 继续处理其他数据，不中断导入过程
+
                 # 创建新记录
                 new_item = models.ToyItem(
                     factory_code=row[field_indices.get("factory_code")].value if "factory_code" in field_indices else None,
@@ -322,8 +402,7 @@ async def import_items(
                     product_size=row[field_indices.get("product_size")].value if "product_size" in field_indices else None,
                     inner_box=row[field_indices.get("inner_box")].value if "inner_box" in field_indices else None,
                     remarks=row[field_indices.get("remarks")].value if "remarks" in field_indices else None,
-                    # 图片字段在Excel中只是一个提示，实际导入时不会处理图片数据
-                    image_path=None
+                    image_path=image_path
                 )
                 
                 # 如果提供了厂名但Excel中没有厂名字段，使用表单提供的厂名
@@ -331,12 +410,25 @@ async def import_items(
                     new_item.factory_name = factory_name
                 
                 # 检查必填字段
-                if not new_item.factory_code or not new_item.name or not new_item.packaging:
-                    continue  # 跳过不完整的行
+                missing_fields = []
+                if not new_item.factory_code:
+                    missing_fields.append("货号")
+                if not new_item.name:
+                    missing_fields.append("品名")
+                if not new_item.packaging:
+                    missing_fields.append("包装")
                 
-                # 添加到数据库
-                db.add(new_item)
-                imported_count += 1
+                if missing_fields:
+                    print(f"导入第 {row_idx} 行时缺少必填字段: {', '.join(missing_fields)}")
+                    continue
+                
+                try:
+                    # 添加到数据库
+                    db.add(new_item)
+                    imported_count += 1
+                except Exception as e:
+                    print(f"导入第 {row_idx} 行时数据库操作失败: {str(e)}")
+                    continue
             except Exception as e:
                 # 记录错误但继续处理其他行
                 print(f"导入第 {row_idx} 行时出错: {str(e)}")
