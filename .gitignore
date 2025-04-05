@@ -15039,3 +15039,7 @@ backend/venv/Scripts/pytest.exe
 backend/__pycache__/import_service.cpython-311.pyc
 backend/__pycache__/test_import_service.cpython-311-pytest-8.3.5.pyc
 backend/exports/货物导入模板 (2).xlsx
+backend/__pycache__/import_service_alt.cpython-312.pyc
+backend/__pycache__/import_service.cpython-312.pyc
+backend/__pycache__/test_import_service.cpython-312-pytest-8.3.5.pyc
+backend/test_fix.py

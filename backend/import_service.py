@@ -8,6 +8,8 @@ import uuid
 from openpyxl import load_workbook
 from PIL import Image as PILImage
 from io import BytesIO
+import zipfile
+import re
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 
@@ -26,7 +28,25 @@ async def import_items(
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        # 打开Excel文件
+        # 使用新方法处理Excel文件
+        # 1. 将.xlsx文件当作zip文件打开，直接提取其中的图片
+        images = []
+        if file.filename.endswith('.xlsx'):
+            try:
+                # 尝试从xlsx文件中提取图片
+                with zipfile.ZipFile(temp_file_path, 'r') as zip_ref:
+                    # 查找所有图片文件
+                    for item in zip_ref.namelist():
+                        if item.startswith('xl/media/') and item.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                            # 提取图片数据
+                            image_data = zip_ref.read(item)
+                            images.append(image_data)
+                            print(f"从Excel中提取图片: {item}")
+            except Exception as e:
+                print(f"提取Excel图片时出错: {str(e)}")
+                # 继续处理，即使没有图片
+
+        # 2. 使用openpyxl读取数据
         workbook = load_workbook(temp_file_path)
         sheet = workbook.active
 
@@ -69,54 +89,43 @@ async def import_items(
             try:
                 # 处理图片
                 image_path = None
-                if "image_path" in field_indices:
-                    try:
-                        # 获取单元格中的图片
-                        cell_coord = f"{chr(65 + field_indices['image_path'])}{row_idx}"
-                        # 使用_images属性获取工作表中的所有图片
-                        for image in sheet._images:
-                            if hasattr(image, 'anchor') and hasattr(image.anchor, '_from') and hasattr(image.anchor._from, 'col') and hasattr(image.anchor._from, 'row'):
-                                # 获取图片所在单元格坐标
-                                cell_col = chr(64 + image.anchor._from.col)
-                                cell_row = image.anchor._from.row
-                                if f"{cell_col}{cell_row}" == cell_coord:
-                                    try:
-                                        # 获取图片数据
-                                        image_data = image._data()
-                                        if not image_data:
-                                            print(f"第 {row_idx} 行的图片数据为空")
-                                            continue
-
-                                        # 从图片数据创建PIL Image对象
-                                        img = PILImage.open(BytesIO(image_data))
-
-                                    # 如果是RGBA模式，转换为RGB
-                                        if img.mode in ('RGBA', 'LA'):
-                                            background = PILImage.new('RGB', img.size, (255, 255, 255))
-                                            background.paste(img, mask=img.split()[-1])
-                                            img = background
-
-                                    # 生成唯一的文件名
-                                        file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
-                                        os.makedirs(UPLOAD_DIR, exist_ok=True)
-                                        file_path = os.path.abspath(os.path.join(UPLOAD_DIR, file_name))
-
-                                    # 确保文件路径在uploads目录内
-                                        if not os.path.commonpath([file_path, os.path.abspath(UPLOAD_DIR)]) == os.path.abspath(UPLOAD_DIR):
-                                            raise ValueError("无效的文件路径")
-
-                                    # 保存为PNG格式，使用最高质量设置
-                                        img.save(file_path, 'PNG', optimize=True, quality=100)
-                                        print(f'成功保存图片到：{file_path}')
-                                    # 设置为相对URL路径以便前端访问
-                                        image_path = f"uploads/{file_name}"
-                                        break  # 找到并处理了图片后就退出循环
-                                    except Exception as e:
-                                        print(f"处理第 {row_idx} 行图片时出错: {str(e)}")
-                                    continue
-                    except Exception as e:
-                        print(f"处理Excel图片时出错: {str(e)}")
-                        # 继续处理其他数据，不中断导入过程
+                if "image_path" in field_indices and images:
+                    # 计算当前行对应的图片索引
+                    img_index = row_idx - 2  # 从0开始
+                    
+                    # 如果有对应的图片，处理并保存
+                    if img_index < len(images):
+                        try:
+                            # 获取图片数据
+                            image_data = images[img_index]
+                            
+                            # 从图片数据创建PIL Image对象
+                            img = PILImage.open(BytesIO(image_data))
+                            
+                            # 如果是RGBA模式，转换为RGB
+                            if img.mode in ('RGBA', 'LA'):
+                                background = PILImage.new('RGB', img.size, (255, 255, 255))
+                                background.paste(img, mask=img.split()[-1])
+                                img = background
+                            
+                            # 生成唯一的文件名
+                            file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
+                            os.makedirs(UPLOAD_DIR, exist_ok=True)
+                            file_path = os.path.abspath(os.path.join(UPLOAD_DIR, file_name))
+                            
+                            # 确保文件路径在uploads目录内
+                            if not os.path.commonpath([file_path, os.path.abspath(UPLOAD_DIR)]) == os.path.abspath(UPLOAD_DIR):
+                                raise ValueError("无效的文件路径")
+                            
+                            # 保存为PNG格式
+                            img.save(file_path, 'PNG', optimize=True, quality=100)
+                            print(f'成功保存图片到：{file_path}')
+                            
+                            # 设置为相对URL路径以便前端访问
+                            image_path = f"uploads/{file_name}"
+                            print(f'图片路径已设置: {image_path}')
+                        except Exception as e:
+                            print(f"处理第 {row_idx} 行图片时出错: {str(e)}")
 
                 # 创建新记录
                 new_item = models.ToyItem(

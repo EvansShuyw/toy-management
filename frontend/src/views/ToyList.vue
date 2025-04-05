@@ -37,6 +37,7 @@
             fit="cover"
             style="width: 50px; height: 50px"
             :preview-src-list="[`http://localhost:8000/${row.image_path}`]"
+            @error="() => console.error('图片加载失败:', row.image_path)"
           />
           <el-icon v-else><Picture /></el-icon>
         </template>
@@ -153,6 +154,7 @@
             </template>
           </el-upload>
         </el-form-item>
+
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -481,13 +483,14 @@ const handleImport = async () => {
     formData.append('file', importForm.value.file)
     formData.append('factory_name', importForm.value.factory_name)
     
-    const response = await axios.post('http://localhost:8000/items/import', formData)
+    // 使用唯一的导入方法
+    const importEndpoint = 'http://localhost:8000/items/import'
+    
+    console.log('使用导入方法')
+    const response = await axios.post(importEndpoint, formData)
     
     if (response.data && response.data.imported_count) {
       ElMessage.success(`成功导入 ${response.data.imported_count} 条数据`)
-          importing.value = false
-          uploadRef.value.clearFiles()
-          importDialogVisible.value = false
       importDialogVisible.value = false
       fetchItems()
       importForm.value = {
@@ -591,6 +594,14 @@ onMounted(() => {
   max-height: 100%;
   display: block;
   object-fit: contain;
+}
+
+.import-method-tip {
+  margin-top: 10px;
+}
+
+.el-switch {
+  margin-right: 10px;
 }
 
 .el-table {
