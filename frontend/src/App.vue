@@ -10,7 +10,25 @@
 </template>
 
 <script setup>
-import { ElContainer, ElHeader, ElMain } from 'element-plus'
+import { ref } from 'vue'
+import { ElContainer, ElHeader, ElMain, ElAlert } from 'element-plus'
+
+// 定义API基础URL
+const API_URL = 'http://localhost:8000';
+
+// 状态变量
+const items = ref([]);
+const loading = ref(false);
+const searchName = ref('');
+const searchFactory = ref('');
+const selectedItems = ref([]);
+const showAddForm = ref(false);
+const showEditForm = ref(false);
+const currentItem = ref(null);
+const importFile = ref(null);
+const importFactoryName = ref('');
+const importLoading = ref(false);
+const importResult = ref(null);
 </script>
 
 <style>
