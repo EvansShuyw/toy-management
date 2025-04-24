@@ -70,18 +70,39 @@ async def create_item(factory_code: str = Form(...),
     # 处理图片上传
     image_path = None
     if image:
-        file_ext = os.path.splitext(image.filename)[1]
+        # 验证文件类型，只允许图片文件
+        file_ext = os.path.splitext(image.filename)[1].lower()
+        allowed_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="只允许上传图片文件（JPG、JPEG、PNG、GIF、BMP）")
+            
+        # 保存文件前验证文件内容是否为有效图片
+        try:
+            # 保存文件内容到内存中进行验证
+            contents = await image.read()
+            try:
+                # 尝试用PIL打开图片验证格式
+                img = PILImage.open(BytesIO(contents))
+                img.verify()  # 验证图片完整性
+                # 重置文件指针，以便后续保存文件
+                await image.seek(0)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"无效的图片文件: {str(e)}")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"文件验证失败: {str(e)}")
+            
         file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-    try:
-        file_path = os.path.join(UPLOAD_DIR, file_name)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        # 确保文件路径正确
-        image_path = os.path.relpath(file_path, os.path.dirname(__file__)).replace('\\', '/')
-        # 设置为相对URL路径以便前端访问
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
+        try:
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            # 确保文件路径正确
+            image_path = os.path.relpath(file_path, os.path.dirname(__file__)).replace('\\', '/')
+            # 设置为相对URL路径以便前端访问
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
+    
     
     # 创建数据库记录
     db_item = models.ToyItem(
@@ -129,6 +150,27 @@ async def update_item(item_id: int,
     # 处理图片上传
     image_path = db_item.image_path
     if image:
+        # 验证文件类型，只允许图片文件
+        file_ext = os.path.splitext(image.filename)[1].lower()
+        allowed_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="只允许上传图片文件（JPG、JPEG、PNG、GIF、BMP）")
+            
+        # 保存文件前验证文件内容是否为有效图片
+        try:
+            # 保存文件内容到内存中进行验证
+            contents = await image.read()
+            try:
+                # 尝试用PIL打开图片验证格式
+                img = PILImage.open(BytesIO(contents))
+                img.verify()  # 验证图片完整性
+                # 重置文件指针，以便后续保存文件
+                await image.seek(0)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"无效的图片文件: {str(e)}")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"文件验证失败: {str(e)}")
+            
         # 删除旧图片
         if db_item.image_path:
             old_file_path = os.path.join(os.path.dirname(__file__), db_item.image_path.lstrip('/'))
@@ -136,7 +178,6 @@ async def update_item(item_id: int,
                 os.remove(old_file_path)
         
         # 保存新图片
-        file_ext = os.path.splitext(image.filename)[1]
         file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         try:

@@ -99,14 +99,19 @@ async def import_items(
                             # 获取图片数据
                             image_data = images[img_index]
                             
-                            # 从图片数据创建PIL Image对象
-                            img = PILImage.open(BytesIO(image_data))
-                            
-                            # 如果是RGBA模式，转换为RGB
-                            if img.mode in ('RGBA', 'LA'):
-                                background = PILImage.new('RGB', img.size, (255, 255, 255))
-                                background.paste(img, mask=img.split()[-1])
-                                img = background
+                            # 验证文件是否为图片格式
+                            try:
+                                # 从图片数据创建PIL Image对象
+                                img = PILImage.open(BytesIO(image_data))
+                                
+                                # 如果是RGBA模式，转换为RGB
+                                if img.mode in ('RGBA', 'LA'):
+                                    background = PILImage.new('RGB', img.size, (255, 255, 255))
+                                    background.paste(img, mask=img.split()[-1])
+                                    img = background
+                            except Exception as e:
+                                print(f"无效的图片格式: {str(e)}")
+                                continue  # 跳过无效的图片
                             
                             # 生成唯一的文件名
                             file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
