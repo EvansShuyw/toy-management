@@ -35,9 +35,11 @@
             v-if="row.image_path"
             :src="`http://localhost:8000/${row.image_path}`"
             fit="cover"
-            style="width: 50px; height: 50px"
-            :preview-src-list="[`http://localhost:8000/${row.image_path}`]"
-            @error="() => console.error('图片加载失败:', row.image_path)"
+            style="width: 50px; height: 50px; cursor: pointer;"
+            :preview-src-list="getPreviewImages(row)"
+            :initial-index="0"
+            preview-teleported
+            @error="() => handleImageError(row)"
           />
           <el-icon v-else><Picture /></el-icon>
         </template>
@@ -174,8 +176,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, onMounted, computed } from 'vue'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import axios from 'axios'
 import { Picture, Plus } from '@element-plus/icons-vue'
 
@@ -303,6 +305,23 @@ const handleImageChange = (file) => {
       imageUrl.value = URL.createObjectURL(file.raw)
     }
   }
+}
+
+// 获取预览图片列表
+const getPreviewImages = (row) => {
+  if (!row.image_path) return []
+  return [`http://localhost:8000/${row.image_path}`]
+}
+
+// 处理图片加载错误
+const handleImageError = (row) => {
+  console.error('图片加载失败:', row.image_path)
+  ElNotification({
+    title: '图片加载失败',
+    message: `无法加载图片: ${row.name || row.factory_code}`,
+    type: 'warning',
+    duration: 3000
+  })
 }
 
 const formRef = ref(null)
@@ -668,6 +687,19 @@ onMounted(() => {
 
 :deep(.el-image-viewer__canvas) {
   z-index: 2000;
+}
+
+:deep(.el-image-viewer__img) {
+  max-width: 80%;
+  max-height: 80%;
+  object-fit: contain;
+}
+
+:deep(.el-image-viewer__actions) {
+  z-index: 2001;
+  padding: 12px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
 }
 
 /* 对话框样式 */
