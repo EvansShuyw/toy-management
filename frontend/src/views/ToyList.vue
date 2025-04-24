@@ -111,9 +111,16 @@
             :show-file-list="false"
             :auto-upload="false"
             :on-change="handleImageChange"
+            :before-upload="beforeImageUpload"
+            accept="image/jpeg,image/png,image/gif,image/bmp"
             :limit="1">
             <img v-if="imageUrl" :src="imageUrl" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+            <template #tip>
+              <div class="el-upload__tip">
+                请上传图片文件(JPG、JPEG、PNG、GIF、BMP)
+              </div>
+            </template>
           </el-upload>
         </el-form-item>
       </el-form>
@@ -275,11 +282,26 @@ const showEditDialog = (row) => {
   dialogVisible.value = true
 }
 
+// 验证上传的文件是否为图片类型
+const beforeImageUpload = (file) => {
+  const isImage = file.type.startsWith('image/');
+  const isAllowedType = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp'].includes(file.type);
+  
+  if (!isImage || !isAllowedType) {
+    ElMessage.error('只能上传图片文件(JPG、JPEG、PNG、GIF、BMP)！');
+    return false;
+  }
+  return true;
+}
+
 // 处理图片变更
 const handleImageChange = (file) => {
   if (file && file.raw) {
-    imageFile.value = file.raw
-    imageUrl.value = URL.createObjectURL(file.raw)
+    // 再次验证文件类型
+    if (beforeImageUpload(file.raw)) {
+      imageFile.value = file.raw
+      imageUrl.value = URL.createObjectURL(file.raw)
+    }
   }
 }
 
