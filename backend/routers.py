@@ -99,8 +99,15 @@ async def create_item(factory_code: str = Form(...),
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         try:
             file_path = os.path.join(UPLOAD_DIR, file_name)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
+            # 使用上下文管理器确保文件正确关闭
+            try:
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(image.file, buffer)
+            except IOError as e:
+                raise HTTPException(status_code=500, detail=f"文件写入失败: {str(e)}")
+            finally:
+                if image.file:
+                    image.file.close()
             # 确保文件路径正确
             image_path = os.path.relpath(file_path, os.path.dirname(__file__)).replace('\\', '/')
             # 设置为相对URL路径以便前端访问
@@ -186,8 +193,15 @@ async def update_item(item_id: int,
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         try:
             file_path = os.path.join(UPLOAD_DIR, file_name)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
+            # 使用上下文管理器确保文件正确关闭
+            try:
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(image.file, buffer)
+            except IOError as e:
+                raise HTTPException(status_code=500, detail=f"文件写入失败: {str(e)}")
+            finally:
+                if image.file:
+                    image.file.close()
             # 设置为相对URL路径以便前端访问
             image_path = f"uploads/{file_name}"
         except Exception as e:
@@ -242,48 +256,36 @@ logger = logging.getLogger(__name__)
 @router.post("/items/export")
 async def export_items(request: dict = Body(...), db: Session = Depends(models.get_db)):
     item_ids = request.get("item_ids", [])
-    # 获取选中的项目
     items = db.query(models.ToyItem).filter(models.ToyItem.id.in_(item_ids)).all()
     if not items:
         raise HTTPException(status_code=400, detail="No items found for export")
-    
-    # 创建内存缓存，避免重复处理相同的图片
-    image_cache = {}
-    
+
     # 创建Excel工作簿
     wb = Workbook()
     ws = wb.active
     ws.title = "货物报价表"
-    
-    # 记录开始时间
+
     start_time = time.time()
-    
-    # 添加表头
+
     headers = ["图片", "货号", "厂名", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
-        # 设置表头单元格样式：水平居中、自动换行
         cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
-    
-    # 设置列宽 - 按照要求设置
-    # 图片列宽设为20px
+
     ws.column_dimensions['A'].width = 20
-    # 品名列宽设为30px
     ws.column_dimensions['D'].width = 30
-    # 其他列设置合适的宽度
     for col_idx in range(2, len(headers) + 1):
-        if col_idx != 4:  # 跳过品名列，因为已经单独设置了
+        if col_idx != 4:
             col_letter = chr(64 + col_idx)
             ws.column_dimensions[col_letter].width = 15
-    
-    # 添加数据
+
+    # 只缓存图片的二进制数据，避免openpyxl Image对象复用
+    image_cache = {}
+
     for row, item in enumerate(items, 2):
-        # 设置行高为100px（Excel中的行高单位约为0.75pt = 1px）
-        ws.row_dimensions[row].height = 75  # 100px 约等于 75pt
-        
-        # 添加数据并设置单元格样式
+        ws.row_dimensions[row].height = 75
         for col_idx, value in enumerate([
-            None,  # 图片列稍后处理
+            None,
             item.factory_code,
             item.factory_name,
             item.name,
@@ -297,111 +299,67 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
             item.inner_box,
             item.remarks
         ], 1):
-            if col_idx > 1:  # 跳过图片列
+            if col_idx > 1:
                 cell = ws.cell(row=row, column=col_idx, value=value)
-                # 设置所有文本单元格水平居中并启用自动换行
                 cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
-        
+
         # 处理图片
         if item.image_path and os.path.exists(item.image_path):
-            # 检查缓存中是否已有相同的图片
-            image_hash = hash(open(item.image_path, 'rb').read())
+            with open(item.image_path, 'rb') as f:
+                image_bytes = f.read()
+            image_hash = hash(image_bytes)
+            # 只缓存图片的二进制数据
             if image_hash in image_cache:
-                # 使用缓存的图片对象
-                img = image_cache[image_hash]
-                img.anchor = OneCellAnchor(
-                    _from=AnchorMarker(col=0, colOff=0, row=row-1, rowOff=0),
-                    ext=img.anchor.ext
-                )
-                ws.add_image(img)
+                pil_image = image_cache[image_hash]
             else:
-                # 使用PIL打开并转换图片
-                pil_image = PILImage.open(item.image_path)
-                # 转换图片为RGB模式（如果是RGBA）
+                pil_image = PILImage.open(BytesIO(image_bytes))
                 if pil_image.mode in ('RGBA', 'LA'):
                     background = PILImage.new('RGB', pil_image.size, (255, 255, 255))
                     background.paste(pil_image, mask=pil_image.split()[-1])
                     pil_image = background
-                
-                # 获取原始图片尺寸
-                img_width, img_height = pil_image.size
-                
-                # 计算单元格的实际尺寸（像素）
-                cell_width = ws.column_dimensions['A'].width * 7  # 列宽转换为像素
-                cell_height = ws.row_dimensions[row].height * 0.75  # 行高转换为像素
-                
-                # 保存为临时的BytesIO对象，使用优化的设置
-                img_byte_arr = BytesIO()
-                # 使用JPEG格式和适当的质量设置，在文件大小和质量之间取得平衡
-                pil_image.save(img_byte_arr, format='JPEG', optimize=True, quality=85)
-                img_byte_arr.seek(0)
-                
-                # 创建openpyxl图片对象
-                img = Image(img_byte_arr)
-                
-                # 导入必要的类
-                from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
-                from openpyxl.utils.units import pixels_to_EMU, points_to_pixels
-                from openpyxl.drawing.xdr import XDRPositiveSize2D
-                
-                # 获取单元格的实际尺寸（以像素为单位）
-                cell_width = points_to_pixels(ws.column_dimensions['A'].width * 7)  # 列宽转换为像素
-                cell_height = points_to_pixels(ws.row_dimensions[row].height)  # 行高转换为像素
-                
-                # 计算图片的缩放比例，保持宽高比
-                padding = 4  # 每边2像素的内边距
-                max_width = cell_width - padding
-                max_height = cell_height - padding
-                scale = min(max_width/img_width, max_height/img_height)
-                
-                # 计算缩放后的尺寸
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
-                
-                # 计算图片在单元格中的偏移量，使其居中
-                col_offset = pixels_to_EMU((cell_width - new_width) // 2)
-                row_offset = pixels_to_EMU((cell_height - new_height) // 2)
-                
-                # 创建单元格锚点标记，使用计算出的偏移量
-                marker = AnchorMarker(col=0, colOff=col_offset, row=row-1, rowOff=row_offset)
-                
-                # 创建图片尺寸对象（EMU单位）
-                size = XDRPositiveSize2D(pixels_to_EMU(new_width), pixels_to_EMU(new_height))
-                
-                # 创建单元格锚点
-                anchor = OneCellAnchor(_from=marker, ext=size)
-                img.anchor = anchor
-                
-                # 设置图片为单元格内容，并禁止编辑
-                img.anchor.editAs = 'oneCell'
-                
-                # 将图片添加到工作表
-                ws.add_image(img)
-                
-                # 将处理后的图片对象存入缓存
-                image_cache[image_hash] = img
-            
-            # 设置图片单元格的对齐方式
+                image_cache[image_hash] = pil_image
+
+            img_width, img_height = pil_image.size
+            cell_width = ws.column_dimensions['A'].width * 7
+            cell_height = ws.row_dimensions[row].height * 0.75
+            img_byte_arr = BytesIO()
+            pil_image.save(img_byte_arr, format='JPEG', optimize=True, quality=85)
+            img_byte_arr.seek(0)
+            img = Image(img_byte_arr)
+            img._byte_stream = img_byte_arr
+
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.utils.units import pixels_to_EMU, points_to_pixels
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+
+            cell_width = points_to_pixels(ws.column_dimensions['A'].width * 7)
+            cell_height = points_to_pixels(ws.row_dimensions[row].height)
+            padding = 4
+            max_width = cell_width - padding
+            max_height = cell_height - padding
+            scale = min(max_width/img_width, max_height/img_height)
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            col_offset = pixels_to_EMU((cell_width - new_width) // 2)
+            row_offset = pixels_to_EMU((cell_height - new_height) // 2)
+            marker = AnchorMarker(col=0, colOff=col_offset, row=row-1, rowOff=row_offset)
+            size = XDRPositiveSize2D(pixels_to_EMU(new_width), pixels_to_EMU(new_height))
+            anchor = OneCellAnchor(_from=marker, ext=size)
+            img.anchor = anchor
+            img.anchor.editAs = 'oneCell'
+            ws.add_image(img)
             cell = ws.cell(row=row, column=1)
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
 
-    
-    # 记录处理完成时间
     process_time = time.time() - start_time
     logger.info(f"数据处理完成，耗时：{process_time:.2f}秒")
-    
-    # 保存Excel文件
     save_start_time = time.time()
     file_name = f"货物报价表_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
     os.makedirs("exports", exist_ok=True)
     file_path = os.path.join("exports", file_name)
     wb.save(file_path)
-    
-    # 记录保存完成时间
     save_time = time.time() - save_start_time
     logger.info(f"文件保存完成，耗时：{save_time:.2f}秒")
-    
-    # 返回文件并在发送后删除
     return FileResponse(
         path=file_path,
         filename=file_name,

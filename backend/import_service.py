@@ -170,11 +170,16 @@ async def import_items(
 
                     # 保存为JPG格式 - 使用异步IO操作和超时控制
                     def save_image():
-                        # 使用优化参数保存图片
-                        img.save(file_path, 'JPEG',
-                                 optimize=True,
-                                 quality=image_quality,  # 降低质量以减小文件大小
-                                 progressive=True)  # 使用渐进式JPEG提高加载体验
+                        # 使用上下文管理器确保文件正确关闭
+                        try:
+                            with open(file_path, 'wb') as f:
+                                img.save(f, 'JPEG',
+                                        optimize=True,
+                                        quality=image_quality,
+                                        progressive=True)
+                        except IOError as e:
+                            logger.error(f'图片保存失败：{file_path} - {str(e)}')
+                            raise
                         return file_path
 
                     # 在线程池中执行IO密集型操作，并添加超时控制
