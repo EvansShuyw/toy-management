@@ -30,6 +30,7 @@ class ToyItem(Base):
     inner_box = Column(String(100), comment="内箱")
     remarks = Column(String(255), comment="备注")
     image_path = Column(String(255), comment="图片路径")
+    origin_sheet = Column(String(255), default='', comment='来源工作表名称')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
