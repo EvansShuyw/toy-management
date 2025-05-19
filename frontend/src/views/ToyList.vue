@@ -315,7 +315,15 @@ const showCreateDialog = () => {
 // 显示编辑对话框
 const showEditDialog = (row) => {
   dialogType.value = 'edit'
-  form.value = { ...row }
+  // 创建一个新对象，确保数值字段被转换为数字类型
+  form.value = { 
+    ...row,
+    // 显式转换数值字段为数字类型
+    unit_price: Number(row.unit_price),
+    packing_quantity: Number(row.packing_quantity),
+    gross_weight: Number(row.gross_weight),
+    net_weight: Number(row.net_weight)
+  }
   imageUrl.value = row.image_path ? `http://localhost:8000/${row.image_path}` : ''
   imageFile.value = null
   dialogVisible.value = true
