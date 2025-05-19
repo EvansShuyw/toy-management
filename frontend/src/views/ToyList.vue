@@ -9,6 +9,9 @@
           <el-form-item label="厂名" prop="factory_name">
             <el-input v-model="searchForm.factory_name" placeholder="请输入厂名" clearable />
           </el-form-item>
+          <el-form-item label="货号" prop="factory_code">
+            <el-input v-model="searchForm.factory_code" placeholder="请输入货号" clearable />
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="handleSearch">搜索</el-button>
             <el-button @click="handleReset">重置</el-button>
@@ -56,6 +59,16 @@
       <el-table-column prop="product_size" label="产品规格" />
       <el-table-column prop="inner_box" label="内箱" />
       <el-table-column prop="remarks" label="备注" />
+      <el-table-column prop="created_at" label="录入时间" width="150">
+        <template #default="{ row }">
+          {{ formatDateTime(row.created_at) }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="updated_at" label="更新时间" width="150">
+        <template #default="{ row }">
+          {{ formatDateTime(row.updated_at) }}
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="150">
         <template #default="{ row }">
           <el-button type="primary" link @click="showEditDialog(row)">编辑</el-button>
@@ -105,6 +118,14 @@
         </el-form-item>
         <el-form-item label="备注" prop="remarks">
           <el-input v-model="form.remarks" type="textarea" :rows="2" />
+        </el-form-item>
+        <!-- 录入时间只在编辑模式下显示，且为只读 -->
+        <el-form-item v-if="dialogType === 'edit'" label="录入时间">
+          <el-input :value="formatDateTime(form.created_at)" readonly disabled />
+        </el-form-item>
+        <!-- 更新时间只在编辑模式下显示，且为只读 -->
+        <el-form-item v-if="dialogType === 'edit'" label="更新时间">
+          <el-input :value="formatDateTime(form.updated_at)" readonly disabled />
         </el-form-item>
         <el-form-item label="图片">
           <el-upload
@@ -181,6 +202,18 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import axios from 'axios'
 import { Picture, Plus } from '@element-plus/icons-vue'
 
+// 日期格式化函数
+const formatDateTime = (dateString) => {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}`
+}
+
 const loading = ref(false)
 const items = ref([])
 const selectedItems = ref([])
@@ -202,11 +235,13 @@ const form = ref({
   product_size: '',
   inner_box: '',
   remarks: ''
+  // entry_time字段已移除，将在提交表单时自动设置
 })
 
 const searchForm = ref({
   name: '',
-  factory_name: ''
+  factory_name: '',
+  factory_code: ''
 })
 
 const searchFormRef = ref(null)
@@ -218,7 +253,8 @@ const handleSearch = async () => {
     const response = await axios.get('http://localhost:8000/items/', {
       params: {
         name: searchForm.value.name,
-        factory_name: searchForm.value.factory_name
+        factory_name: searchForm.value.factory_name,
+        factory_code: searchForm.value.factory_code
       }
     })
     items.value = response.data
@@ -269,6 +305,7 @@ const showCreateDialog = () => {
     product_size: '',
     inner_box: '',
     remarks: ''
+    // entry_time字段已移除，将在提交表单时自动设置
   }
   imageUrl.value = ''
   imageFile.value = null
@@ -397,6 +434,19 @@ const handleSubmit = async () => {
     formData.append('product_size', form.value.product_size)
     formData.append('inner_box', form.value.inner_box)
     formData.append('remarks', form.value.remarks || '')
+    
+    // 创建新货物时自动使用当前时间作为录入时间
+    if (dialogType.value === 'create') {
+      formData.append('entry_time', new Date().toISOString())
+    } else if (form.value.entry_time) {
+      // 编辑时保留原有录入时间
+      formData.append('entry_time', form.value.entry_time)
+    }
+    
+    // 编辑模式下保留原有的created_at（录入时间）
+    if (dialogType.value === 'edit' && form.value.created_at) {
+      formData.append('created_at', form.value.created_at)
+    }
     
     if (imageFile.value) {
       formData.append('image', imageFile.value)

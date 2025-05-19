@@ -25,12 +25,14 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 获取所有货物报价表项目
 @router.get("/items/", response_model=List[dict])
-def get_items(name: str = None, factory_name: str = None, db: Session = Depends(models.get_db)):
+def get_items(name: str = None, factory_name: str = None, factory_code: str = None, db: Session = Depends(models.get_db)):
     query = db.query(models.ToyItem)
     if name:
         query = query.filter(models.ToyItem.name.ilike(f"%{name}%"))
     if factory_name:
         query = query.filter(models.ToyItem.factory_name.ilike(f"%{factory_name}%"))
+    if factory_code:
+        query = query.filter(models.ToyItem.factory_code.ilike(f"%{factory_code}%"))
     items = query.all()
     return [{
         "id": item.id,
