@@ -245,22 +245,46 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
     # 添加表头
     headers = ["图片", "货号", "厂名", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
     for col, header in enumerate(headers, 1):
-        ws.cell(row=1, column=col, value=header)
+        cell = ws.cell(row=1, column=col, value=header)
+        # 设置表头单元格样式：水平居中、自动换行
+        cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    # 设置列宽 - 按照要求设置
+    # 图片列宽设为20px
+    ws.column_dimensions['A'].width = 20
+    # 品名列宽设为30px
+    ws.column_dimensions['D'].width = 30
+    # 其他列设置合适的宽度
+    for col_idx in range(2, len(headers) + 1):
+        if col_idx != 4:  # 跳过品名列，因为已经单独设置了
+            col_letter = chr(64 + col_idx)
+            ws.column_dimensions[col_letter].width = 15
     
     # 添加数据
     for row, item in enumerate(items, 2):
-        ws.cell(row=row, column=2, value=item.factory_code)
-        ws.cell(row=row, column=3, value=item.factory_name)
-        ws.cell(row=row, column=4, value=item.name)
-        ws.cell(row=row, column=5, value=item.packaging)
-        ws.cell(row=row, column=6, value=item.packing_quantity)
-        ws.cell(row=row, column=7, value=item.unit_price)
-        ws.cell(row=row, column=8, value=item.gross_weight)
-        ws.cell(row=row, column=9, value=item.net_weight)
-        ws.cell(row=row, column=10, value=item.outer_box_size)
-        ws.cell(row=row, column=11, value=item.product_size)
-        ws.cell(row=row, column=12, value=item.inner_box)
-        ws.cell(row=row, column=13, value=item.remarks)
+        # 设置行高为100px（Excel中的行高单位约为0.75pt = 1px）
+        ws.row_dimensions[row].height = 75  # 100px 约等于 75pt
+        
+        # 添加数据并设置单元格样式
+        for col_idx, value in enumerate([
+            None,  # 图片列稍后处理
+            item.factory_code,
+            item.factory_name,
+            item.name,
+            item.packaging,
+            item.packing_quantity,
+            item.unit_price,
+            item.gross_weight,
+            item.net_weight,
+            item.outer_box_size,
+            item.product_size,
+            item.inner_box,
+            item.remarks
+        ], 1):
+            if col_idx > 1:  # 跳过图片列
+                cell = ws.cell(row=row, column=col_idx, value=value)
+                # 设置所有文本单元格水平居中并启用自动换行
+                cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
         
         # 处理图片
         if item.image_path and os.path.exists(item.image_path):
@@ -275,39 +299,61 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
             # 获取原始图片尺寸
             img_width, img_height = pil_image.size
             
-            # 设置更合理的尺寸限制，保持更高的图片质量
-            max_height = 600  # 增加最大高度限制
-            max_width = 800   # 增加最大宽度限制
-            
-            # 计算缩放比例，但保持更高的图片质量
-            scale = min(max_width/img_width, max_height/img_height, 1.0)
-            new_width = int(img_width * scale)
-            new_height = int(img_height * scale)
-            
-            # 仅当图片超过最大限制时才调整大小，使用高质量的缩放算法
-            if scale < 1.0:
-                pil_image = pil_image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+            # 计算单元格的实际尺寸（像素）
+            cell_width = ws.column_dimensions['A'].width * 7  # 列宽转换为像素
+            cell_height = ws.row_dimensions[row].height * 0.75  # 行高转换为像素
             
             # 保存为临时的BytesIO对象，使用最高质量设置
             img_byte_arr = BytesIO()
+            # 保存为PNG格式以保持最高质量
             pil_image.save(img_byte_arr, format='PNG', optimize=False, quality=100)
             img_byte_arr.seek(0)
             
             # 创建openpyxl图片对象
             img = Image(img_byte_arr)
             
-            # 根据图片实际大小设置单元格，增加系数以确保单元格足够大
-            row_height = new_height * 0.85  # 增加Excel单元格高度转换因子
-            col_width = new_width * 0.18   # 增加Excel单元格宽度转换因子
+            # 导入必要的类
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.utils.units import pixels_to_EMU, points_to_pixels
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
             
-            # 设置单元格大小
-            ws.row_dimensions[row].height = row_height
-            ws.column_dimensions['A'].width = col_width
+            # 获取单元格的实际尺寸（以像素为单位）
+            # Excel中1个单位宽度约等于7像素，1个单位高度约等于1.33像素
+            cell_width = points_to_pixels(ws.column_dimensions['A'].width * 7)  # 列宽转换为像素
+            cell_height = points_to_pixels(ws.row_dimensions[row].height)  # 行高转换为像素
             
-            # 将图片添加到单元格，使用精确定位
-            cell_address = f'A{row}'
-            ws.add_image(img, cell_address)
-            # 调整单元格对齐方式
+            # 计算图片的缩放比例，保持宽高比
+            # 为了确保图片完全适应单元格，我们需要考虑一些内边距
+            padding = 4  # 每边2像素的内边距
+            max_width = cell_width - padding
+            max_height = cell_height - padding
+            scale = min(max_width/img_width, max_height/img_height)
+            
+            # 计算缩放后的尺寸
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            # 计算图片在单元格中的偏移量，使其居中
+            col_offset = pixels_to_EMU((cell_width - new_width) // 2)
+            row_offset = pixels_to_EMU((cell_height - new_height) // 2)
+            
+            # 创建单元格锚点标记，使用计算出的偏移量
+            marker = AnchorMarker(col=0, colOff=col_offset, row=row-1, rowOff=row_offset)
+            
+            # 创建图片尺寸对象（EMU单位）
+            size = XDRPositiveSize2D(pixels_to_EMU(new_width), pixels_to_EMU(new_height))
+            
+            # 创建单元格锚点
+            anchor = OneCellAnchor(_from=marker, ext=size)
+            img.anchor = anchor
+            
+            # 设置图片为单元格内容，并禁止编辑
+            img.anchor.editAs = 'oneCell'
+            
+            # 将图片添加到工作表
+            ws.add_image(img)
+            
+            # 设置图片单元格的对齐方式
             cell = ws.cell(row=row, column=1)
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
 

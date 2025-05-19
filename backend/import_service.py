@@ -27,8 +27,8 @@ async def import_items(
     db: Session = Depends(models.get_db),
     batch_size: int = 50,  # 批量提交数据库的大小
     max_workers: int = 8,  # 并行处理图片的工作线程数
-    max_image_size: int = 800,  # 图片最大尺寸（宽或高）
-    image_quality: int = 85,  # 图片压缩质量
+    max_image_size: int = 3500,  # 图片最大尺寸（宽或高）
+    image_quality: int = 100,  # 图片压缩质量
     timeout_per_image: int = 10  # 每张图片处理的超时时间（秒）
 ):
     # 检查文件类型
