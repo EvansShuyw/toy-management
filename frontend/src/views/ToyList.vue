@@ -275,10 +275,30 @@ const handleReset = () => {
 const fetchItems = async () => {
   loading.value = true
   try {
-    const response = await axios.get('http://localhost:8000/items/')
+    // 添加请求拦截器
+axios.interceptors.request.use(config => {
+  console.log('请求发出:', config.method.toUpperCase(), config.url)
+  return config
+})
+
+// 添加响应拦截器
+axios.interceptors.response.use(response => {
+  console.log('响应收到:', {
+    status: response.status,
+    data: response.data
+  })
+  return response
+})
+
+const response = await axios.get('http://localhost:8000/items/')
     items.value = response.data
   } catch (error) {
-    ElMessage.error('获取数据失败')
+    console.error('获取数据失败:', {
+      message: error.message,
+      response: error.response,
+      config: error.config
+    })
+    ElMessage.error(`获取数据失败: ${error.response?.status || '网络连接异常'}`)
   } finally {
     loading.value = false
   }

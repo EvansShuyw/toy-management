@@ -50,6 +50,7 @@ def get_items(name: str = None, factory_name: str = None, factory_code: str = No
         "inner_box": item.inner_box,
         "remarks": item.remarks,
         "image_path": item.image_path,
+        "origin_sheet": item.origin_sheet,
         "created_at": item.created_at,
         "updated_at": item.updated_at
     } for item in items]
