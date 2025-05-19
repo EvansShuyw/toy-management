@@ -5,6 +5,7 @@ from typing import List
 import models
 from datetime import datetime
 import os
+import time
 import shutil
 import uuid
 from openpyxl import Workbook, load_workbook
@@ -12,7 +13,7 @@ from openpyxl.drawing.image import Image
 from PIL import Image as PILImage
 from io import BytesIO
 import openpyxl.styles
-import os.path
+import os
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from import_service import import_items
@@ -228,6 +229,14 @@ def delete_item(item_id: int, db: Session = Depends(models.get_db)):
     db.commit()
     return {"message": "Item deleted successfully"}
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 # 导出选中的货物报价表为Excel
 @router.post("/items/export")
 async def export_items(request: dict = Body(...), db: Session = Depends(models.get_db)):
@@ -237,10 +246,16 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
     if not items:
         raise HTTPException(status_code=400, detail="No items found for export")
     
+    # 创建内存缓存，避免重复处理相同的图片
+    image_cache = {}
+    
     # 创建Excel工作簿
     wb = Workbook()
     ws = wb.active
     ws.title = "货物报价表"
+    
+    # 记录开始时间
+    start_time = time.time()
     
     # 添加表头
     headers = ["图片", "货号", "厂名", "品名", "包装", "装箱量PCS", "单价", "毛重KG", "净重KG", "外箱规格CM", "产品规格", "内箱", "备注"]
@@ -288,81 +303,102 @@ async def export_items(request: dict = Body(...), db: Session = Depends(models.g
         
         # 处理图片
         if item.image_path and os.path.exists(item.image_path):
-            # 使用PIL打开并转换图片
-            pil_image = PILImage.open(item.image_path)
-            # 转换图片为RGB模式（如果是RGBA）
-            if pil_image.mode in ('RGBA', 'LA'):
-                background = PILImage.new('RGB', pil_image.size, (255, 255, 255))
-                background.paste(pil_image, mask=pil_image.split()[-1])
-                pil_image = background
-            
-            # 获取原始图片尺寸
-            img_width, img_height = pil_image.size
-            
-            # 计算单元格的实际尺寸（像素）
-            cell_width = ws.column_dimensions['A'].width * 7  # 列宽转换为像素
-            cell_height = ws.row_dimensions[row].height * 0.75  # 行高转换为像素
-            
-            # 保存为临时的BytesIO对象，使用最高质量设置
-            img_byte_arr = BytesIO()
-            # 保存为PNG格式以保持最高质量
-            pil_image.save(img_byte_arr, format='PNG', optimize=False, quality=100)
-            img_byte_arr.seek(0)
-            
-            # 创建openpyxl图片对象
-            img = Image(img_byte_arr)
-            
-            # 导入必要的类
-            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
-            from openpyxl.utils.units import pixels_to_EMU, points_to_pixels
-            from openpyxl.drawing.xdr import XDRPositiveSize2D
-            
-            # 获取单元格的实际尺寸（以像素为单位）
-            # Excel中1个单位宽度约等于7像素，1个单位高度约等于1.33像素
-            cell_width = points_to_pixels(ws.column_dimensions['A'].width * 7)  # 列宽转换为像素
-            cell_height = points_to_pixels(ws.row_dimensions[row].height)  # 行高转换为像素
-            
-            # 计算图片的缩放比例，保持宽高比
-            # 为了确保图片完全适应单元格，我们需要考虑一些内边距
-            padding = 4  # 每边2像素的内边距
-            max_width = cell_width - padding
-            max_height = cell_height - padding
-            scale = min(max_width/img_width, max_height/img_height)
-            
-            # 计算缩放后的尺寸
-            new_width = int(img_width * scale)
-            new_height = int(img_height * scale)
-            
-            # 计算图片在单元格中的偏移量，使其居中
-            col_offset = pixels_to_EMU((cell_width - new_width) // 2)
-            row_offset = pixels_to_EMU((cell_height - new_height) // 2)
-            
-            # 创建单元格锚点标记，使用计算出的偏移量
-            marker = AnchorMarker(col=0, colOff=col_offset, row=row-1, rowOff=row_offset)
-            
-            # 创建图片尺寸对象（EMU单位）
-            size = XDRPositiveSize2D(pixels_to_EMU(new_width), pixels_to_EMU(new_height))
-            
-            # 创建单元格锚点
-            anchor = OneCellAnchor(_from=marker, ext=size)
-            img.anchor = anchor
-            
-            # 设置图片为单元格内容，并禁止编辑
-            img.anchor.editAs = 'oneCell'
-            
-            # 将图片添加到工作表
-            ws.add_image(img)
+            # 检查缓存中是否已有相同的图片
+            image_hash = hash(open(item.image_path, 'rb').read())
+            if image_hash in image_cache:
+                # 使用缓存的图片对象
+                img = image_cache[image_hash]
+                img.anchor = OneCellAnchor(
+                    _from=AnchorMarker(col=0, colOff=0, row=row-1, rowOff=0),
+                    ext=img.anchor.ext
+                )
+                ws.add_image(img)
+            else:
+                # 使用PIL打开并转换图片
+                pil_image = PILImage.open(item.image_path)
+                # 转换图片为RGB模式（如果是RGBA）
+                if pil_image.mode in ('RGBA', 'LA'):
+                    background = PILImage.new('RGB', pil_image.size, (255, 255, 255))
+                    background.paste(pil_image, mask=pil_image.split()[-1])
+                    pil_image = background
+                
+                # 获取原始图片尺寸
+                img_width, img_height = pil_image.size
+                
+                # 计算单元格的实际尺寸（像素）
+                cell_width = ws.column_dimensions['A'].width * 7  # 列宽转换为像素
+                cell_height = ws.row_dimensions[row].height * 0.75  # 行高转换为像素
+                
+                # 保存为临时的BytesIO对象，使用优化的设置
+                img_byte_arr = BytesIO()
+                # 使用JPEG格式和适当的质量设置，在文件大小和质量之间取得平衡
+                pil_image.save(img_byte_arr, format='JPEG', optimize=True, quality=85)
+                img_byte_arr.seek(0)
+                
+                # 创建openpyxl图片对象
+                img = Image(img_byte_arr)
+                
+                # 导入必要的类
+                from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+                from openpyxl.utils.units import pixels_to_EMU, points_to_pixels
+                from openpyxl.drawing.xdr import XDRPositiveSize2D
+                
+                # 获取单元格的实际尺寸（以像素为单位）
+                cell_width = points_to_pixels(ws.column_dimensions['A'].width * 7)  # 列宽转换为像素
+                cell_height = points_to_pixels(ws.row_dimensions[row].height)  # 行高转换为像素
+                
+                # 计算图片的缩放比例，保持宽高比
+                padding = 4  # 每边2像素的内边距
+                max_width = cell_width - padding
+                max_height = cell_height - padding
+                scale = min(max_width/img_width, max_height/img_height)
+                
+                # 计算缩放后的尺寸
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                
+                # 计算图片在单元格中的偏移量，使其居中
+                col_offset = pixels_to_EMU((cell_width - new_width) // 2)
+                row_offset = pixels_to_EMU((cell_height - new_height) // 2)
+                
+                # 创建单元格锚点标记，使用计算出的偏移量
+                marker = AnchorMarker(col=0, colOff=col_offset, row=row-1, rowOff=row_offset)
+                
+                # 创建图片尺寸对象（EMU单位）
+                size = XDRPositiveSize2D(pixels_to_EMU(new_width), pixels_to_EMU(new_height))
+                
+                # 创建单元格锚点
+                anchor = OneCellAnchor(_from=marker, ext=size)
+                img.anchor = anchor
+                
+                # 设置图片为单元格内容，并禁止编辑
+                img.anchor.editAs = 'oneCell'
+                
+                # 将图片添加到工作表
+                ws.add_image(img)
+                
+                # 将处理后的图片对象存入缓存
+                image_cache[image_hash] = img
             
             # 设置图片单元格的对齐方式
             cell = ws.cell(row=row, column=1)
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
 
     
+    # 记录处理完成时间
+    process_time = time.time() - start_time
+    logger.info(f"数据处理完成，耗时：{process_time:.2f}秒")
+    
     # 保存Excel文件
+    save_start_time = time.time()
     file_name = f"货物报价表_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
     os.makedirs("exports", exist_ok=True)
     file_path = os.path.join("exports", file_name)
     wb.save(file_path)
+    
+    # 记录保存完成时间
+    save_time = time.time() - save_start_time
+    logger.info(f"文件保存完成，耗时：{save_time:.2f}秒")
     
     # 返回文件并在发送后删除
     return FileResponse(
