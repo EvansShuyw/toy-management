@@ -160,7 +160,7 @@ async def update_item(item_id: int,
     
     # 处理图片上传
     image_path = db_item.image_path
-    if image:
+    if image and image.filename:
         # 验证文件类型，只允许图片文件
         file_ext = os.path.splitext(image.filename)[1].lower()
         allowed_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
@@ -184,9 +184,16 @@ async def update_item(item_id: int,
             
         # 删除旧图片
         if db_item.image_path:
-            old_file_path = os.path.join(os.path.dirname(__file__), db_item.image_path.lstrip('/'))
+            # 正确处理图片路径，db_item.image_path格式为"uploads/filename.jpg"
+            # 需要去除开头的"uploads/"，因为UPLOAD_DIR已经包含了这个路径
+            old_file_name = os.path.basename(db_item.image_path)
+            old_file_path = os.path.join(UPLOAD_DIR, old_file_name)
             if os.path.exists(old_file_path):
-                os.remove(old_file_path)
+                try:
+                    os.remove(old_file_path)
+                    print(f"成功删除旧图片: {old_file_path}")
+                except Exception as e:
+                    print(f"删除旧图片失败: {str(e)}")
         
         # 保存新图片
         file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"

@@ -36,7 +36,7 @@
         <template #default="{ row }">
           <el-image
             v-if="row.image_path"
-            :src="`http://localhost:8000/${row.image_path}`"
+            :src="`http://localhost:8000/${row.image_path}?t=${new Date().getTime()}`"
             fit="cover"
             style="width: 50px; height: 50px; cursor: pointer;"
             :preview-src-list="getPreviewImages(row)"
@@ -81,8 +81,9 @@
     <el-dialog
       :title="dialogType === 'create' ? '新增货物' : '编辑货物'"
       v-model="dialogVisible"
-      width="500px">
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
+      width="50%"
+      @close="handleDialogClose">
+      <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
         <el-form-item label="货号" prop="factory_code">
           <el-input v-model="form.factory_code" />
         </el-form-item>
@@ -135,13 +136,18 @@
             :auto-upload="false"
             :on-change="handleImageChange"
             :before-upload="beforeImageUpload"
+            :on-remove="handleImageRemove"
+            :on-error="handleUploadError"
             accept="image/jpeg,image/png,image/gif,image/bmp"
-            :limit="1">
+            :limit="1"
+            ref="imageUploadRef"
+            :key="uploadKey">
             <img v-if="imageUrl" :src="imageUrl" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
             <template #tip>
               <div class="el-upload__tip">
                 请上传图片文件(JPG、JPEG、PNG、GIF、BMP)
+                <el-button v-if="imageUrl" type="primary" link @click="clearUploadImage">清除图片</el-button>
               </div>
             </template>
           </el-upload>
@@ -221,6 +227,8 @@ const dialogVisible = ref(false)
 const dialogType = ref('create')
 const imageUrl = ref('')
 const imageFile = ref(null)
+const imageUploadRef = ref(null)
+const uploadKey = ref(Date.now()) // 用于强制重新创建上传组件
 
 const form = ref({
   factory_code: '',
@@ -329,6 +337,13 @@ const showCreateDialog = () => {
   }
   imageUrl.value = ''
   imageFile.value = null
+  // 重置上传组件
+  if (imageUploadRef.value) {
+    imageUploadRef.value.clearFiles()
+  }
+  // 更新uploadKey强制重新创建上传组件
+  uploadKey.value = Date.now()
+  console.log('打开创建对话框并更新uploadKey:', uploadKey.value)
   dialogVisible.value = true
 }
 
@@ -344,9 +359,33 @@ const showEditDialog = (row) => {
     gross_weight: Number(row.gross_weight),
     net_weight: Number(row.net_weight)
   }
-  imageUrl.value = row.image_path ? `http://localhost:8000/${row.image_path}` : ''
+  // 添加时间戳参数防止浏览器缓存
+  imageUrl.value = row.image_path ? `http://localhost:8000/${row.image_path}?t=${new Date().getTime()}` : ''
   imageFile.value = null
+  // 重置上传组件
+  if (imageUploadRef.value) {
+    imageUploadRef.value.clearFiles()
+  }
+  // 更新uploadKey强制重新创建上传组件
+  uploadKey.value = Date.now()
+  console.log('打开编辑对话框并更新uploadKey:', uploadKey.value)
   dialogVisible.value = true
+}
+
+// 处理对话框关闭
+const handleDialogClose = () => {
+  // 释放之前创建的URL对象
+  if (imageUrl.value && imageUrl.value.startsWith('blob:')) {
+    URL.revokeObjectURL(imageUrl.value)
+  }
+  imageFile.value = null
+  // 重置上传组件
+  if (imageUploadRef.value) {
+    imageUploadRef.value.clearFiles()
+  }
+  // 更新uploadKey强制重新创建上传组件
+  uploadKey.value = Date.now()
+  console.log('关闭对话框并更新uploadKey:', uploadKey.value)
 }
 
 // 验证上传的文件是否为图片类型
@@ -363,19 +402,100 @@ const beforeImageUpload = (file) => {
 
 // 处理图片变更
 const handleImageChange = (file) => {
+  console.log('handleImageChange 触发', file)
+  console.log('当前文件状态:', {
+    fileExists: !!file,
+    fileRawExists: file && !!file.raw,
+    currentImageUrl: imageUrl.value,
+    currentImageFile: imageFile.value ? '存在' : '不存在'
+  })
+  
   if (file && file.raw) {
     // 再次验证文件类型
     if (beforeImageUpload(file.raw)) {
+      console.log('文件类型验证通过，准备更新图片')
+      // 如果之前有创建的URL对象，先释放它以避免内存泄漏
+      if (imageUrl.value && imageUrl.value.startsWith('blob:')) {
+        console.log('释放之前的blob URL:', imageUrl.value)
+        URL.revokeObjectURL(imageUrl.value)
+      }
+      
+      // 强制重置上传组件状态
+      if (imageUploadRef.value) {
+        console.log('重置上传组件状态')
+        imageUploadRef.value.clearFiles()
+      }
+      
       imageFile.value = file.raw
       imageUrl.value = URL.createObjectURL(file.raw)
+      console.log('已更新图片:', {
+        newImageUrl: imageUrl.value,
+        fileType: file.raw.type,
+        fileSize: file.raw.size
+      })
+      
+      // 更新uploadKey强制重新创建上传组件
+      uploadKey.value = Date.now()
+      console.log('更新uploadKey:', uploadKey.value)
+      
+      // 强制更新上传组件的显示
+      setTimeout(() => {
+        if (imageUploadRef.value) {
+          console.log('触发上传组件重新渲染')
+          imageUploadRef.value.$forceUpdate()
+        }
+      }, 0)
+    } else {
+      console.log('文件类型验证失败')
     }
+  } else {
+    console.log('没有收到有效的文件对象')
   }
+}
+
+// 清除已上传的图片
+const clearUploadImage = () => {
+  // 释放之前创建的URL对象
+  if (imageUrl.value && imageUrl.value.startsWith('blob:')) {
+    URL.revokeObjectURL(imageUrl.value)
+  }
+  imageUrl.value = ''
+  imageFile.value = null
+  // 重置上传组件
+  if (imageUploadRef.value) {
+    imageUploadRef.value.clearFiles()
+  }
+  // 更新uploadKey强制重新创建上传组件
+  uploadKey.value = Date.now()
+  console.log('清除图片并更新uploadKey:', uploadKey.value)
+}
+
+// 处理图片移除
+const handleImageRemove = (file) => {
+  console.log('handleImageRemove 触发', file)
+  // 释放之前创建的URL对象
+  if (imageUrl.value && imageUrl.value.startsWith('blob:')) {
+    console.log('释放blob URL:', imageUrl.value)
+    URL.revokeObjectURL(imageUrl.value)
+  }
+  imageUrl.value = ''
+  imageFile.value = null
+  console.log('图片已移除')
+}
+
+// 处理上传错误
+const handleUploadError = (err, file, fileList) => {
+  console.log('上传错误:', err)
+  console.log('错误文件:', file)
+  console.log('文件列表:', fileList)
+  ElMessage.error(`上传失败: ${err.message || '未知错误'}`)
 }
 
 // 获取预览图片列表
 const getPreviewImages = (row) => {
   if (!row.image_path) return []
-  return [`http://localhost:8000/${row.image_path}`]
+  // 添加时间戳参数防止浏览器缓存
+  return [`http://localhost:8000/${row.image_path}?t=${new Date().getTime()}`]
 }
 
 // 处理图片加载错误
@@ -662,41 +782,23 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.toy-list {
-  padding: 20px;
-  font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
-  font-size: 16px;
-  font-weight: bold;
+.avatar-uploader .avatar {
+  width: 178px;
+  height: 178px;
+  display: block;
 }
 
-.operation-bar {
-  margin-bottom: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.search-form {
-  flex: 1;
-}
-
-.button-group {
-  display: flex;
-  gap: 10px;
-}
-
-.avatar-uploader {
-  border: 1px dashed #d9d9d9;
+.avatar-uploader .el-upload {
+  border: 1px dashed var(--el-border-color);
   border-radius: 6px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  width: 178px;
-  height: 178px;
+  transition: var(--el-transition-duration-fast);
 }
 
-.avatar-uploader:hover {
-  border-color: #409EFF;
+.avatar-uploader .el-upload:hover {
+  border-color: var(--el-color-primary);
 }
 
 .avatar-uploader-icon {
@@ -705,96 +807,79 @@ onMounted(() => {
   width: 178px;
   height: 178px;
   text-align: center;
-  line-height: 178px;
 }
 
-.avatar {
+.image-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.image-preview img {
   max-width: 100%;
   max-height: 100%;
-  display: block;
-  object-fit: contain;
 }
 
-.import-method-tip {
-  margin-top: 10px;
+.preview-dialog .el-dialog__body {
+  height: 70vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-.el-switch {
+.search-form {
+  margin-bottom: 20px;
+}
+
+.table-operations {
+  margin-bottom: 20px;
+}
+
+.table-operations .el-button {
   margin-right: 10px;
 }
 
-.el-table {
-  position: relative;
-  z-index: 1;
-  text-align: center;
+.el-table .warning-row {
+  --el-table-tr-bg-color: var(--el-color-warning-light-9);
 }
 
-/* 确保表格内容居中 */
-:deep(.el-table .cell) {
-  text-align: center;
+.el-table .success-row {
+  --el-table-tr-bg-color: var(--el-color-success-light-9);
 }
 
-/* 确保表头居中 */
-:deep(.el-table th > .cell) {
-  text-align: center;
+.el-table .error-row {
+  --el-table-tr-bg-color: var(--el-color-error-light-9);
 }
 
-/* 确保图片预览组件显示在最上层 */
-:deep(.el-image-viewer__wrapper) {
-  position: fixed;
-  z-index: 2000;
+.table-header-operations {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
-:deep(.el-image-viewer__mask) {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 1999;
-  background-color: rgba(0, 0, 0, 0.5);
+.table-header-operations .left-operations {
+  display: flex;
+  gap: 10px;
 }
 
-:deep(.el-image-viewer__btn) {
-  z-index: 2001;
+.table-header-operations .right-operations {
+  display: flex;
+  gap: 10px;
 }
 
-:deep(.el-image-viewer__close) {
-  z-index: 2001;
+.export-options {
+  margin-top: 10px;
 }
 
-:deep(.el-image-viewer__canvas) {
-  z-index: 2000;
+.export-options .el-checkbox {
+  margin-right: 15px;
+  margin-bottom: 10px;
 }
 
-:deep(.el-image-viewer__img) {
-  max-width: 80%;
-  max-height: 80%;
-  object-fit: contain;
-}
-
-:deep(.el-image-viewer__actions) {
-  z-index: 2001;
-  padding: 12px;
-  background-color: rgba(0, 0, 0, 0.7);
-  border-radius: 4px;
-}
-
-/* 对话框样式 */
-:deep(.el-dialog__header) {
-  text-align: center;
-}
-
-:deep(.el-dialog__title) {
-  font-weight: bold;
-  font-size: 18px;
-}
-
-:deep(.el-form-item__label) {
-  font-weight: bold;
-}
-
-:deep(.el-button) {
+.export-options-title {
+  margin-bottom: 10px;
   font-weight: bold;
 }
 </style>
