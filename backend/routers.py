@@ -234,6 +234,35 @@ async def update_item(item_id: int,
     db.refresh(db_item)
     return db_item
 
+# 批量删除货物报价表项目
+@router.delete("/items/batch")
+def batch_delete_items(request: dict = Body(...), db: Session = Depends(models.get_db)):
+    item_ids = request.get("item_ids", [])
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="No items specified for deletion")
+    
+    # 查询所有要删除的项目
+    items = db.query(models.ToyItem).filter(models.ToyItem.id.in_(item_ids)).all()
+    deleted_count = 0
+    
+    for item in items:
+        # 删除关联的图片文件
+        if item.image_path:
+            file_path = os.path.join(UPLOAD_DIR, os.path.basename(item.image_path))
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    # 记录错误但继续删除数据库记录
+                    print(f"Error deleting image file: {str(e)}")
+        
+        # 删除数据库记录
+        db.delete(item)
+        deleted_count += 1
+    
+    db.commit()
+    return {"message": f"{deleted_count} items deleted successfully"}
+
 # 删除货物报价表项目
 @router.delete("/items/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(models.get_db)):

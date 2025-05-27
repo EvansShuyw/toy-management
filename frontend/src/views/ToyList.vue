@@ -22,6 +22,7 @@
         <el-button type="primary" @click="showCreateDialog">新增货物</el-button>
         <el-button type="success" :disabled="!selectedItems.length" @click="handleExport">导出Excel</el-button>
         <el-button type="warning" @click="showImportDialog">导入Excel</el-button>
+        <el-button type="danger" :disabled="!selectedItems.length" @click="batchDelete">批量删除</el-button>
       </div>
     </div>
 
@@ -652,6 +653,32 @@ const handleDelete = async (row) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败')
+    }
+  }
+}
+
+// 批量删除
+const batchDelete = async () => {
+  if (selectedItems.value.length === 0) {
+    ElMessage.warning('请选择要删除的货物')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(`确定要删除选中的 ${selectedItems.value.length} 条记录吗？`)
+    await axios.delete('http://localhost:8000/items/batch', {
+      data: {
+        item_ids: selectedItems.value.map(item => item.id)
+      }
+    })
+    ElMessage.success('批量删除成功')
+    fetchItems()
+    // 清空选中状态
+    selectedItems.value = []
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量删除失败:', error)
+      ElMessage.error('批量删除失败')
     }
   }
 }
