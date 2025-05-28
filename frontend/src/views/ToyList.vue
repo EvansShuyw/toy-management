@@ -78,6 +78,25 @@
       </el-table-column>
     </el-table>
 
+    <!-- 分页控件 -->
+    <div class="pagination-container">
+      <el-pagination
+        v-model:current-page="pagination.currentPage"
+        v-model:page-size="pagination.pageSize"
+        :page-sizes="pagination.pageSizes"
+        :total="pagination.total"
+        layout="total, sizes, prev, pager, next, jumper"
+        :prev-text="'上一页'"
+        :next-text="'下一页'"
+        :page-size-text="'条/页'"
+        :total-text="'共 {total} 条'"
+        :jumper-text="'前往'"
+        :page-text="'页'"
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+      />
+    </div>
+
     <!-- 新增/编辑对话框 -->
     <el-dialog
       :title="dialogType === 'create' ? '新增货物' : '编辑货物'"
@@ -257,21 +276,9 @@ const searchFormRef = ref(null)
 
 // 处理搜索
 const handleSearch = async () => {
-  loading.value = true
-  try {
-    const response = await axios.get('http://localhost:8000/items/', {
-      params: {
-        name: searchForm.value.name,
-        factory_name: searchForm.value.factory_name,
-        factory_code: searchForm.value.factory_code
-      }
-    })
-    items.value = response.data
-  } catch (error) {
-    ElMessage.error('搜索失败')
-  } finally {
-    loading.value = false
-  }
+  // 搜索时重置为第一页
+  pagination.value.currentPage = 1
+  await fetchItems()
 }
 
 // 处理重置
@@ -280,27 +287,46 @@ const handleReset = () => {
   fetchItems()
 }
 
+// 分页相关数据
+const pagination = ref({
+  currentPage: 1,
+  pageSize: 10,
+  total: 0,
+  pageSizes: [10, 20, 50]
+})
+
 // 获取货物列表
 const fetchItems = async () => {
   loading.value = true
   try {
     // 添加请求拦截器
-axios.interceptors.request.use(config => {
-  console.log('请求发出:', config.method.toUpperCase(), config.url)
-  return config
-})
+    axios.interceptors.request.use(config => {
+      console.log('请求发出:', config.method.toUpperCase(), config.url)
+      return config
+    })
 
-// 添加响应拦截器
-axios.interceptors.response.use(response => {
-  console.log('响应收到:', {
-    status: response.status,
-    data: response.data
-  })
-  return response
-})
+    // 添加响应拦截器
+    axios.interceptors.response.use(response => {
+      console.log('响应收到:', {
+        status: response.status,
+        data: response.data
+      })
+      return response
+    })
 
-const response = await axios.get('http://localhost:8000/items/')
-    items.value = response.data
+    const response = await axios.get('http://localhost:8000/items/', {
+      params: {
+        ...searchForm.value,
+        page: pagination.value.currentPage,
+        page_size: pagination.value.pageSize
+      }
+    })
+    
+    // 更新数据和分页信息
+    items.value = response.data.items
+    pagination.value.total = response.data.total
+    pagination.value.currentPage = response.data.page
+    pagination.value.pageSize = response.data.page_size
   } catch (error) {
     console.error('获取数据失败:', {
       message: error.message,
@@ -316,6 +342,23 @@ const response = await axios.get('http://localhost:8000/items/')
 // 处理表格选择
 const handleSelectionChange = (selection) => {
   selectedItems.value = selection
+}
+
+// 处理页码变化
+const handleCurrentChange = (page) => {
+  pagination.value.currentPage = page
+  fetchItems()
+}
+
+// 处理每页显示数量变化
+const handleSizeChange = (size) => {
+  pagination.value.pageSize = size
+  // 切换每页数量时，如果当前页码超出范围，自动调整到第一页
+  const maxPage = Math.ceil(pagination.value.total / size)
+  if (pagination.value.currentPage > maxPage) {
+    pagination.value.currentPage = 1
+  }
+  fetchItems()
 }
 
 // 显示创建对话框
@@ -774,7 +817,34 @@ const handleImport = async () => {
     }
   } catch (error) {
     console.error('导入失败:', error)
-    ElMessage.error(error.response?.data?.detail || '导入失败')
+    
+    // 获取详细的错误信息
+    let errorMessage = '导入失败'
+    if (error.response?.data?.detail) {
+      errorMessage = error.response.data.detail
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    
+    // 显示详细的错误信息
+    ElMessage({
+      message: errorMessage,
+      type: 'error',
+      duration: 8000, // 延长显示时间以便用户阅读完整错误信息
+      showClose: true
+    })
+    
+    // 如果是数据转换错误，给出额外提示
+    if (errorMessage.includes('could not convert') || errorMessage.includes('导入第') || errorMessage.includes('行时出错')) {
+      setTimeout(() => {
+        ElMessage({
+          message: '提示：请检查Excel文件中的数值字段格式，确保数值字段只包含数字，不包含文字说明',
+          type: 'warning',
+          duration: 10000,
+          showClose: true
+        })
+      }, 1000)
+    }
   } finally {
     importing.value = false
   }
@@ -809,6 +879,28 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.toy-list {
+  padding: 20px;
+}
+
+.operation-bar {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.button-group {
+  display: flex;
+  gap: 10px;
+}
+
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
 .avatar-uploader .avatar {
   width: 178px;
   height: 178px;

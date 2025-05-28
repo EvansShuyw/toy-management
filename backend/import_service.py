@@ -280,10 +280,72 @@ async def import_items(
                     # 获取图片路径（如果有）
                     image_path = None
                     if "image_path" in field_indices and image_paths:
-                        # 计算当前行对应的图片索引
-                        img_index = row_idx - 2  # 从0开始
+                        # 计算当前行对应的图片索引（使用全局行索引）
+                        img_index = global_row_index
                         # 如果有对应的图片，使用预处理的路径
                         image_path = image_paths.get(img_index)
+                        logger.debug(f"第 {row_idx} 行（全局索引 {img_index}）关联图片: {image_path}")
+
+                    # 数据清理函数
+                    def clean_numeric_value(value):
+                        """清理数值字段，处理包含换行符、特殊字符的情况"""
+                        if value is None:
+                            return 0.0
+                        
+                        # 如果已经是数字类型，直接返回
+                        if isinstance(value, (int, float)):
+                            return float(value)
+                        
+                        # 转换为字符串并清理
+                        str_value = str(value).strip()
+                        if not str_value:
+                            return 0.0
+                        
+                        # 移除换行符和多余空格
+                        str_value = re.sub(r'\s+', ' ', str_value)
+                        
+                        # 尝试提取第一个数字（处理类似"(带音乐)27.8\n（不带音乐）26.8"的情况）
+                        # 查找所有数字（包括小数）
+                        numbers = re.findall(r'\d+\.?\d*', str_value)
+                        if numbers:
+                            try:
+                                return float(numbers[0])  # 返回第一个找到的数字
+                            except ValueError:
+                                pass
+                        
+                        # 如果无法提取数字，返回0
+                        logger.warning(f"无法解析数值: '{str_value}'，使用默认值0")
+                        return 0.0
+                    
+                    def clean_int_value(value):
+                        """清理整数字段"""
+                        if value is None:
+                            return 0
+                        
+                        if isinstance(value, int):
+                            return value
+                        
+                        if isinstance(value, float):
+                            return int(value)
+                        
+                        # 转换为字符串并清理
+                        str_value = str(value).strip()
+                        if not str_value:
+                            return 0
+                        
+                        # 移除换行符和多余空格
+                        str_value = re.sub(r'\s+', ' ', str_value)
+                        
+                        # 尝试提取第一个整数
+                        numbers = re.findall(r'\d+', str_value)
+                        if numbers:
+                            try:
+                                return int(numbers[0])
+                            except ValueError:
+                                pass
+                        
+                        logger.warning(f"无法解析整数: '{str_value}'，使用默认值0")
+                        return 0
 
                     # 创建新记录
                     new_item = models.ToyItem(
@@ -291,10 +353,10 @@ async def import_items(
                         factory_name=row[field_indices.get("factory_name")].value if "factory_name" in field_indices else factory_name,
                         name=row[field_indices.get("name")].value if "name" in field_indices else None,
                         packaging=row[field_indices.get("packaging")].value if "packaging" in field_indices else None,
-                        packing_quantity=int(row[field_indices.get("packing_quantity")].value) if "packing_quantity" in field_indices and row[field_indices.get("packing_quantity")].value is not None else 0,
-                        unit_price=float(row[field_indices.get("unit_price")].value) if "unit_price" in field_indices and row[field_indices.get("unit_price")].value is not None else 0.0,
-                        gross_weight=float(row[field_indices.get("gross_weight")].value) if "gross_weight" in field_indices and row[field_indices.get("gross_weight")].value is not None else 0.0,
-                        net_weight=float(row[field_indices.get("net_weight")].value) if "net_weight" in field_indices and row[field_indices.get("net_weight")].value is not None else 0.0,
+                        packing_quantity=clean_int_value(row[field_indices.get("packing_quantity")].value) if "packing_quantity" in field_indices else 0,
+                        unit_price=clean_numeric_value(row[field_indices.get("unit_price")].value) if "unit_price" in field_indices else 0.0,
+                        gross_weight=clean_numeric_value(row[field_indices.get("gross_weight")].value) if "gross_weight" in field_indices else 0.0,
+                        net_weight=clean_numeric_value(row[field_indices.get("net_weight")].value) if "net_weight" in field_indices else 0.0,
                         outer_box_size=row[field_indices.get("outer_box_size")].value if "outer_box_size" in field_indices else None,
                         product_size=row[field_indices.get("product_size")].value if "product_size" in field_indices else None,
                         inner_box=row[field_indices.get("inner_box")].value if "inner_box" in field_indices else None,
@@ -328,17 +390,25 @@ async def import_items(
                         # 当达到批处理大小时，批量提交到数据库
                         if len(batch_items) >= batch_size:
                             db.add_all(batch_items)
-                            db.flush()  # 刷新但不提交
+                            db.commit()  # 立即提交这批数据
                             batch_items = []  # 清空批处理列表
-                            logger.info(f"已批量处理 {imported_count} 条记录")
+                            logger.info(f"已批量提交 {imported_count} 条记录到数据库")
 
                     except Exception as e:
                         logger.error(f"导入第 {row_idx} 行时数据库操作失败: {str(e)}")
                         continue
                 except Exception as e:
-                    # 记录错误但继续处理其他行
-                    logger.error(f"导入第 {row_idx} 行时出错: {str(e)}")
-                    continue
+                    error_msg = f"导入第 {row_idx} 行时出错: {e}"
+                    logger.error(error_msg)
+                    # 立即停止导入并返回错误信息
+                    try:
+                        db.rollback()
+                    except Exception as rollback_error:
+                        logger.error(f"回滚失败: {rollback_error}")
+                    # 清理临时文件
+                    if os.path.exists(temp_file_path):
+                        os.remove(temp_file_path)
+                    raise Exception(f"Excel导入失败: {error_msg}")
 
             # 处理剩余的批次
             if batch_items:
@@ -366,7 +436,10 @@ async def import_items(
 
     except Exception as e:
         # 回滚事务
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            logger.error(f"回滚失败: {rollback_error}")
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
     finally:

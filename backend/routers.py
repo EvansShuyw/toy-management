@@ -24,9 +24,16 @@ router = APIRouter()
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# 获取所有货物报价表项目
-@router.get("/items/", response_model=List[dict])
-def get_items(name: str = None, factory_name: str = None, factory_code: str = None, db: Session = Depends(models.get_db)):
+# 获取所有货物报价表项目（支持分页）
+@router.get("/items/")
+def get_items(
+    name: str = None, 
+    factory_name: str = None, 
+    factory_code: str = None, 
+    page: int = 1, 
+    page_size: int = 10, 
+    db: Session = Depends(models.get_db)
+):
     query = db.query(models.ToyItem)
     if name:
         query = query.filter(models.ToyItem.name.ilike(f"%{name}%"))
@@ -34,26 +41,42 @@ def get_items(name: str = None, factory_name: str = None, factory_code: str = No
         query = query.filter(models.ToyItem.factory_name.ilike(f"%{factory_name}%"))
     if factory_code:
         query = query.filter(models.ToyItem.factory_code.ilike(f"%{factory_code}%"))
-    items = query.all()
-    return [{
-        "id": item.id,
-        "factory_code": item.factory_code,
-        "factory_name": item.factory_name,
-        "name": item.name,
-        "packaging": item.packaging,
-        "packing_quantity": item.packing_quantity,
-        "unit_price": item.unit_price,
-        "gross_weight": item.gross_weight,
-        "net_weight": item.net_weight,
-        "outer_box_size": item.outer_box_size,
-        "product_size": item.product_size,
-        "inner_box": item.inner_box,
-        "remarks": item.remarks,
-        "image_path": item.image_path,
-        "origin_sheet": item.origin_sheet,
-        "created_at": item.created_at,
-        "updated_at": item.updated_at
-    } for item in items]
+    
+    # 按更新时间降序排序，如果更新时间相同则按创建时间降序排序
+    query = query.order_by(models.ToyItem.updated_at.desc(), models.ToyItem.created_at.desc())
+    
+    # 计算总数
+    total = query.count()
+    
+    # 分页查询
+    offset = (page - 1) * page_size
+    items = query.offset(offset).limit(page_size).all()
+    
+    # 返回分页数据
+    return {
+        "items": [{
+            "id": item.id,
+            "factory_code": item.factory_code,
+            "factory_name": item.factory_name,
+            "name": item.name,
+            "packaging": item.packaging,
+            "packing_quantity": item.packing_quantity,
+            "unit_price": item.unit_price,
+            "gross_weight": item.gross_weight,
+            "net_weight": item.net_weight,
+            "outer_box_size": item.outer_box_size,
+            "product_size": item.product_size,
+            "inner_box": item.inner_box,
+            "remarks": item.remarks,
+            "image_path": item.image_path,
+            "origin_sheet": item.origin_sheet,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at
+        } for item in items],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
 
 # 创建新的货物报价表项目
 @router.post("/items/")
@@ -274,7 +297,11 @@ def delete_item(item_id: int, db: Session = Depends(models.get_db)):
     if db_item.image_path:
         file_path = os.path.join(UPLOAD_DIR, os.path.basename(db_item.image_path))
         if os.path.exists(file_path):
-            os.remove(file_path)
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                # 记录错误但继续删除数据库记录
+                print(f"Error deleting image file: {str(e)}")
     
     db.delete(db_item)
     db.commit()
