@@ -14,6 +14,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
 import logging
+# ValidationError removed - using ValueError instead
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -317,6 +318,30 @@ async def import_items(
                         logger.warning(f"无法解析数值: '{str_value}'，使用默认值0")
                         return 0.0
                     
+                    def validate_unit_price(value, row_idx, col_name):
+                        """严格验证单价字段，必须是数字类型"""
+                        if value is None or value == "":
+                            return 0.0
+                        
+                        # 如果已经是数字类型，直接返回
+                        if isinstance(value, (int, float)):
+                            return float(value)
+                        
+                        # 转换为字符串并清理
+                        str_value = str(value).strip()
+                        if not str_value:
+                            return 0.0
+                        
+                        # 严格的数字格式验证（只允许数字、小数点、负号）
+                        if not re.match(r'^-?\d+(\.\d+)?$', str_value):
+                            raise ValueError(f"数据异常，请检查单价列第{row_idx}行数据")
+                        
+                        try:
+                            numeric_value = float(str_value)
+                            return numeric_value
+                        except ValueError:
+                            raise ValueError(f"数据异常，请检查单价列第{row_idx}行数据")
+                    
                     def clean_int_value(value):
                         """清理整数字段"""
                         if value is None:
@@ -354,7 +379,7 @@ async def import_items(
                         name=row[field_indices.get("name")].value if "name" in field_indices else None,
                         packaging=row[field_indices.get("packaging")].value if "packaging" in field_indices else None,
                         packing_quantity=clean_int_value(row[field_indices.get("packing_quantity")].value) if "packing_quantity" in field_indices else 0,
-                        unit_price=clean_numeric_value(row[field_indices.get("unit_price")].value) if "unit_price" in field_indices else 0.0,
+                        unit_price=validate_unit_price(row[field_indices.get("unit_price")].value, row_idx, "单价") if "unit_price" in field_indices else 0.0,
                         gross_weight=clean_numeric_value(row[field_indices.get("gross_weight")].value) if "gross_weight" in field_indices else 0.0,
                         net_weight=clean_numeric_value(row[field_indices.get("net_weight")].value) if "net_weight" in field_indices else 0.0,
                         outer_box_size=row[field_indices.get("outer_box_size")].value if "outer_box_size" in field_indices else None,

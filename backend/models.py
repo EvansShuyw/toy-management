@@ -22,7 +22,7 @@ class ToyItem(Base):
     name = Column(String(100), comment="品名")
     packaging = Column(String(100), comment="包装")
     packing_quantity = Column(Integer, comment="装箱量PCS")
-    unit_price = Column(Numeric(10, 2), comment="单价")
+    unit_price = Column(Numeric(10, 3), comment="单价")
     gross_weight = Column(Float, comment="毛重KG")
     net_weight = Column(Float, comment="净重KG")
     outer_box_size = Column(String(100), comment="外箱规格CM")

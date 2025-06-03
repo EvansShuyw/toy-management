@@ -35,28 +35,30 @@
       <el-table-column type="selection" width="55" />
       <el-table-column label="图片" width="100">
         <template #default="{ row }">
-          <el-image
-            v-if="row.image_path"
-            :src="`http://localhost:8000/${row.image_path}?t=${new Date().getTime()}`"
-            fit="cover"
-            style="width: 50px; height: 50px; cursor: pointer;"
-            :preview-src-list="getPreviewImages(row)"
-            :initial-index="0"
-            preview-teleported
-            @error="() => handleImageError(row)"
-          />
-          <el-icon v-else><Picture /></el-icon>
+          <div style="width: 100%; height: 80px; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0;">
+            <el-image
+              v-if="row.image_path"
+              :src="`http://localhost:8000/${row.image_path}?t=${new Date().getTime()}`"
+              fit="cover"
+              style="width: 100%; height: 100%; cursor: pointer;"
+              :preview-src-list="getPreviewImages(row)"
+              :initial-index="0"
+              preview-teleported
+              @error="() => handleImageError(row)"
+            />
+            <el-icon v-else style="font-size: 24px;"><Picture /></el-icon>
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="factory_code" label="货号" />
       <el-table-column prop="factory_name" label="厂名" />
       <el-table-column prop="name" label="品名" />
       <el-table-column prop="packaging" label="包装" />
-      <el-table-column prop="packing_quantity" label="装箱量PCS" />
-      <el-table-column prop="unit_price" label="单价" />
-      <el-table-column prop="gross_weight" label="毛重KG" />
-      <el-table-column prop="net_weight" label="净重KG" />
-      <el-table-column prop="outer_box_size" label="外箱规格CM" />
+      <el-table-column prop="packing_quantity" label="装箱量(pcs)" />
+      <el-table-column prop="unit_price" label="单价(元)" />
+      <el-table-column prop="gross_weight" label="毛重(kgs)" />
+      <el-table-column prop="net_weight" label="净重(kgs)" />
+      <el-table-column prop="outer_box_size" label="外箱规格(CM)" />
       <el-table-column prop="product_size" label="产品规格" />
       <el-table-column prop="inner_box" label="内箱" />
       <el-table-column prop="remarks" label="备注" />
@@ -120,7 +122,7 @@
           <el-input-number v-model="form.packing_quantity" :min="1" />
         </el-form-item>
         <el-form-item label="单价" prop="unit_price">
-          <el-input-number v-model="form.unit_price" :min="0" :precision="2" />
+          <el-input-number v-model="form.unit_price" :min="0" :precision="3" />
         </el-form-item>
         <el-form-item label="毛重KG" prop="gross_weight">
           <el-input-number v-model="form.gross_weight" :min="0" :precision="2" />
@@ -292,7 +294,7 @@ const pagination = ref({
   currentPage: 1,
   pageSize: 10,
   total: 0,
-  pageSizes: [10, 20, 50]
+  pageSizes: [10, 20, 50, 100, 200]
 })
 
 // 获取货物列表
